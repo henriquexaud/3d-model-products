@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { X0, LAYERS, layers } from './config.js';
 import { scene } from './scene.js';
-import { MATERIALS, MESH_OVERRIDES } from './materials.js';
+import { MATERIALS, MESH_OVERRIDES, tailGlass, redButton } from './materials.js';
 
 // ---------- Camadas ----------
 const carRoot = new THREE.Group();
@@ -139,6 +139,7 @@ function prepareModel(car) {
       toLayer(o, 'body');
     }
   }
+  for (const o of layers.interior.group.children) if (o.material === tailGlass) o.material = redButton;
   return discs;
 }
 

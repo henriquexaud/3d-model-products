@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { ASSETS, DRACO, layers, state, statusEl, hintEl } from './config.js';
+import { ASSETS, DRACO, layers, state, statusEl } from './config.js';
 import { renderer, scene, camera, controls } from './scene.js';
 import { carRoot, prepareModel } from './layers.js';
 import { buildMechanics, finishMechanics } from './mechanics.js';
@@ -13,7 +13,8 @@ import { addDetails } from './details.js';
 import { buildCluster } from './cluster.js';
 import { buildMirrors, updateMirrors, warmMirrors } from './mirrors.js';
 import { sim, ride, updateDrive, boardCamera, leaveCamera } from './drive.js';
-import { applyBodyMode, updateSpots } from './ui.js';
+import { updateLamps } from './lamps.js';
+import { applyBodyMode, updateSpots, say } from './ui.js';
 
 // ---------- Modelo ----------
 const shadowTexture = new THREE.TextureLoader().load(ASSETS + 'ferrari_ao.png');
@@ -48,12 +49,16 @@ loader.load(
     carRoot.add(shadow);
 
     applyBodyMode();
-    statusEl.remove();
-    hintEl.classList.remove('hidden');
+    // o véu da carga se desfaz e a interface entra
+    statusEl.classList.add('done');
+    document.body.classList.remove('loading');
+    say('Arraste para girar · role para aproximar', 0);
     if (location.search.includes('debug')) window.viewer = { THREE, scene, camera, controls, renderer, carRoot, layers, state, applyBodyMode, frame, sim, ride, get praca() { return praca; }, get road() { return road; } };
   },
   (e) => {
-    if (e.total) statusEl.textContent = `Carregando modelo… ${Math.round(e.loaded / e.total * 100)}%`;
+    if (!e.total) return;
+    statusEl.firstElementChild.textContent = Math.round(e.loaded / e.total * 100);
+    statusEl.style.setProperty('--p', e.loaded / e.total);
   },
   (err) => {
     console.error(err);
@@ -65,7 +70,9 @@ const clock = new THREE.Clock();
 function frame() {
   if (!renderer.domElement.width || !renderer.domElement.height) return;
   controls.update();
-  updateDrive(clock.getDelta());
+  const dt = clock.getDelta();
+  updateDrive(dt);
+  updateLamps(dt, camera);
   if (state.env.scenery === 'road') {
     scene.fog.near = 60;
     scene.fog.far = 260;

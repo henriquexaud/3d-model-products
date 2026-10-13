@@ -3,17 +3,19 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LITE, measures, meters } from './config.js';
 import { renderer, scene, pmrem } from './scene.js';
-import { studio } from './studio.js';
 import { castBump, std, phys } from './materials.js';
 import { carRoot } from './layers.js';
-import { UP, V, rod, rbox, ball, mergeMeshes } from './geometry.js';
+import { dimLamps } from './lamps.js';
+import { UP, V, rod, cyl, rbox, ball, mergeMeshes } from './geometry.js';
 import {
   SUN, HAZE, PAVED, seeded, hash2, fbm, smooth, sharedSky, paverTextures, lawnTexture, tuftTexture,
   clumpTexture, barkTextures, woodTextures, blobTexture, treelineTexture,
 } from './praca-textures.js';
+import { DUSK, SUNLIGHT, MOONLIGHT, nightSky, showHeavens } from './night.js';
 
 // ---------- Praça ----------
-// Cenário externo gerado por código, em metros: céu, sol com sombras, calçadão de blocos, gramado, bancos e árvores
+// Cenário externo gerado por código, em metros: céu, sol com sombras, calçadão de blocos, gramado, bancos, árvores
+// e postes de luz, que acendem à noite
 let praca = null;
 
 // A praça só é montada na primeira vez em que é pedida
@@ -226,18 +228,64 @@ function treeMaterials() {
   return treeKit = { bark, foliage, blob, fineCard: cards(0.95, 1, true), coarseCard: cards(0.95, 1, false) };
 }
 
+// Reflexos e luz ambiente de um cenário: uma foto em 360° tirada de onde o carro fica, sem ele e sem o que estiver em `hide`
+function snapshot(sky, hide) {
+  const rough = pmrem.fromEquirectangular(sky);   // enquanto a foto é tirada, o céu sozinho serve de luz ambiente
+  scene.environment = rough.texture;
+  const target = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
+  const probe = new THREE.CubeCamera(0.3, 300, target);
+  probe.position.set(0, 0.9, 0);
+  const shown = [carRoot, ...hide].filter((o) => o.visible);
+  for (const o of shown) o.visible = false;
+  dimLamps(true);
+  renderer.shadowMap.needsUpdate = true;
+  probe.update(renderer, scene);
+  dimLamps(false);
+  for (const o of shown) o.visible = true;
+  const env = pmrem.fromCubemap(target.texture).texture;
+  target.dispose();
+  rough.dispose();
+  return env;
+}
+// Hora do dia de um cenário ao ar livre. Devolve a função que o veste de dia ou de noite: troca o céu, a bruma e a luz
+// (o sol vira a lua) e escurece o que não depende dela. `fog` é onde a bruma começa e onde encobre tudo; `extra` cuida
+// do que só aquele cenário tem. A foto dos reflexos é tirada na primeira vez em que cada hora é pedida
+function daylight(sun, treeline, fog, hide = [], extra) {
+  const envs = [];
+  return (night) => {
+    const sky = night ? nightSky() : sharedSky(), light = night ? MOONLIGHT : SUNLIGHT, kit = treeMaterials();
+    sun.color.setHex(light.color);
+    sun.intensity = light.intensity;
+    treeline.material.color.setHex(night ? 0x0d121b : 0xffffff);
+    kit.foliage.emissiveIntensity = night ? 0.02 : 0.5;
+    kit.blob.opacity = night ? 0.3 : 0.5;
+    extra?.(night);
+    showHeavens(night);
+    scene.background = sky;
+    scene.fog.color.copy(night ? DUSK : HAZE);
+    [scene.fog.near, scene.fog.far] = fog;
+    scene.environment = envs[+night] ??= snapshot(sky, hide);
+  };
+}
+
+// Poste de luz: coluna de ferro fundido de 3,3 m com um globo leitoso no alto
+function buildLampPost(iron, opal) {
+  const post = new THREE.Group();
+  post.add(cyl(0.085, 0.42, 'y', 0, 0.21, 0, iron, 20, 0.06));
+  post.add(cyl(0.07, 0.035, 'y', 0, 0.44, 0, iron, 20));
+  post.add(rod(V(0, 0.44, 0), V(0, 3.24, 0), 0.042, iron, 0.03, 16));
+  post.add(cyl(0.05, 0.07, 'y', 0, 3.275, 0, iron, 20, 0.105));   // taça onde o globo se apoia
+  mergeMeshes(post);
+  const globe = new THREE.Mesh(new THREE.SphereGeometry(0.19, 32, 20), opal);
+  globe.position.y = 3.47;
+  globe.castShadow = true;
+  post.add(globe);
+  return post;
+}
+
 function buildPraca() {
   const group = new THREE.Group(), rand = seeded(90);
   scene.add(group);
-
-  // céu, usado como fundo e, provisoriamente, como luz ambiente enquanto o cenário é montado
-  const sky = sharedSky();
-  scene.background = sky;
-  scene.environment = pmrem.fromEquirectangular(sky).texture;
-  scene.fog.color.copy(HAZE);
-  scene.fog.near = 30;
-  scene.fog.far = 135;
-  studio.visible = false;
 
   // sol
   const sun = new THREE.DirectionalLight(0xfff0dc, 6.5), focus = new THREE.Vector3(-0.5, 0, -1);
@@ -335,20 +383,36 @@ function buildPraca() {
   group.updateMatrixWorld(true);
   for (const tree of trees) tree.userData.world = tree.localToWorld(tree.userData.centre.clone());
 
-  // reflexos e luz ambiente: uma foto em 360° da praça pronta, tirada de onde o carro fica
-  const target = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
-  const probe = new THREE.CubeCamera(0.3, 300, target);
-  probe.position.set(0, 0.9, 0);
-  carRoot.visible = false;
-  renderer.shadowMap.needsUpdate = true;
-  probe.update(renderer, scene);
-  carRoot.visible = true;
-  const env = pmrem.fromCubemap(target.texture).texture;
-  target.dispose();
+  // postes de luz na beira do gramado: dois do lado do banco e um do lado oposto, perto de quem olha o carro de frente.
+  // De dia ficam apagados; à noite cada globo acende, ganha um halo e ilumina o calçadão em volta
+  const opal = std({ color: 0xe9e6dc, roughness: 0.35, emissive: 0xffd9a8, emissiveIntensity: 0 });
+  const iron = std({ color: 0x1b241e, metalness: 0.35, roughness: 0.55, bumpMap: castBump, bumpScale: 0.3 });
+  const shine = new THREE.SpriteMaterial({ map: blobTexture(), color: 0xffc98f, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+  const bulbs = [];
+  [[PAVED.x0 - 0.42, 5.2], [PAVED.x0 - 0.42, -5.4], [PAVED.x1 + 0.42, -1.6]].forEach(([x, z], i) => {
+    const lamp = buildLampPost(iron, opal), halo = new THREE.Sprite(shine);
+    lamp.position.set(x, 0, z);
+    halo.position.y = 3.47;
+    halo.scale.setScalar(1.5);
+    lamp.add(halo);
+    if (!LITE || i) {   // no celular o poste mais distante só brilha, sem iluminar
+      const bulb = new THREE.PointLight(0xffc98f, 0, 0, 2);
+      bulb.position.y = 3.47;
+      lamp.add(bulb);
+      bulbs.push(bulb);
+    }
+    group.add(lamp);
+  });
+  const dress = daylight(sun, treeline, [30, 135], [], (night) => {
+    opal.emissiveIntensity = night ? 5 : 0;
+    shine.visible = night;
+    for (const bulb of bulbs) bulb.intensity = night ? 36 : 0;
+  });
 
   measures.bench = '1,60 × 0,69 × 0,89 m';
   measures.tree = `${meters(hero.userData.height)} m de altura · copa de ${meters(hero.userData.crown)} m`;
-  return { group, sky, env, trees };
+  measures.lamp = '3,66 m de altura · globo de Ø 38 cm';
+  return { group, trees, dress };
 }
 
-export { praca, ensurePraca, cards, buildTree, treeMaterials };
+export { praca, ensurePraca, cards, buildTree, treeMaterials, daylight };

@@ -133,10 +133,12 @@ if (!LITE) bodyMaterial.onBeforeCompile = (shader) => {
 };
 const alloy = std({ color: 0x8f9399, metalness: 1.0, roughness: 0.28 });
 const darkMetal = std({ color: 0x2a2b2e, metalness: 1.0, roughness: 0.35 });
-const headGlass = std({ color: 0xffffff, roughness: 0.1, emissive: 0xf2f6ff });
-const ledGlass = std({ color: 0xffffff, roughness: 0.2, emissive: 0xfff3e0 });
-const tailGlass = phys({ color: 0x7a0508, roughness: 0.15, clearcoat: 1.0, emissive: 0x8a0000 });
-const LIGHTS = [[headGlass, 1.2], [ledGlass, 0.9], [tailGlass, 0.35]];
+// Lentes dos faróis e das lanternas. Apagadas, são vidro escuro que espelha o entorno; o brilho de cada uma é dado em lamps.js
+const headGlass = std({ color: 0x1c1f24, metalness: 0.85, roughness: 0.08, emissive: 0xe4edff, emissiveIntensity: 0 });
+const ledGlass = std({ color: 0x8d939b, metalness: 0.4, roughness: 0.22, emissive: 0xeef3ff, emissiveIntensity: 0 });
+const tailGlass = phys({ color: 0x7a0508, roughness: 0.15, clearcoat: 1.0, emissive: 0xff1a0c, emissiveIntensity: 0 });
+// Botões vermelhos da cabine: no modelo original usam o material das lanternas, mas não acendem com elas
+const redButton = phys({ color: 0x7a0508, roughness: 0.15, clearcoat: 1.0, emissive: 0x8a0000, emissiveIntensity: 0.35 });
 
 // Material por nome do material original do modelo
 const MATERIALS = {
@@ -244,4 +246,4 @@ const ghost = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false, side: THREE.DoubleSide,
 });
 
-export { castBump, std, phys, bodyMaterial, tailGlass, discSpin, LIGHTS, MATERIALS, MESH_OVERRIDES, mats, highlight, ghost };
+export { castBump, std, phys, bodyMaterial, headGlass, ledGlass, tailGlass, redButton, discSpin, MATERIALS, MESH_OVERRIDES, mats, highlight, ghost };

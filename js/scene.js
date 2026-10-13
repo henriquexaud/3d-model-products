@@ -46,6 +46,7 @@ function studioEnvironment() {
 }
 
 const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 400);   // a proporção é acertada em resize()
+camera.layers.enable(1);                                         // a camada das estrelas (ver night.js)
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.07;

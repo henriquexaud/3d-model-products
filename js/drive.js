@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { AX_F, LAYERS, state, $ } from './config.js';
-import { LIGHTS, tailGlass, discSpin } from './materials.js';
+import { AX_F, LAYERS, $ } from './config.js';
+import { discSpin } from './materials.js';
+import { setBrake } from './lamps.js';
 import { smooth } from './praca-textures.js';
 import { CAR, createSim } from './physics.js';
 import { TO_FRONT, createRide } from './ride.js';
@@ -12,18 +13,14 @@ import { poseExtras } from './extras.js';
 
 // ---------- Condução ----------
 // Liga a física ao que se vê na estrada: o cenário corre, as rodas giram e sobem e descem com o relevo da pista,
-// a carroceria balança sobre a suspensão, as luzes de freio acendem e o painel mostra os números
+// a carroceria balança sobre a suspensão, as luzes de freio acendem e a barra mostra a velocidade
 const sim = createSim(), ride = createRide();
 const SPRUNG = LAYERS.filter((L) => L.id !== 'wheels');   // tudo o que fica apoiado nas molas
 const PIVOT = new THREE.Vector3(0, 0.12, AX_F + TO_FRONT);   // a carroceria inclina em torno de um ponto baixo, sob o centro de massa
-const TAIL = LIGHTS.find(([m]) => m === tailGlass)[1];
 const STILL = [0, 0, 0, 0];
-const el = {
-  hud: $('drive'), input: $('speedInput'), target: $('speedTarget'), speed: $('speedNow'), gear: $('gearNow'),
-  rpm: $('rpmNow'), bar: $('rpmBar'), wheels: $('fWheels'), air: $('fAir'), road: $('fRoad'), travel: [...$('travel').children],
-};
+const el = { hud: $('drive'), input: $('speedInput'), speed: $('speedNow') };
 const lean = new THREE.Euler(), shift = new THREE.Vector3();
-let driving = false, readout = 0, raised = 0;
+let driving = false, raised = 0;
 
 // Carroceria `lift` metros acima do repouso, inclinada para trás (`pitch`) e para o lado (`roll`); as rodas ficam por conta própria
 function settle(lift, pitch, roll) {
@@ -36,21 +33,17 @@ function settle(lift, pitch, roll) {
   }
 }
 const text = (node, value) => { if (node.textContent !== value) node.textContent = value; };
-const newtons = (f) => {
-  const n = Math.round(f / 10) * 10;
-  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toLocaleString('pt-BR')} N`;
-};
 function setTarget(kmh) {
   const value = Math.min(320, Math.max(0, kmh));
   el.input.value = value;
-  el.target.textContent = `${value} km/h`;
+  el.input.style.setProperty('--at', value / 320);   // trecho do trilho que fica preenchido
   sim.target = driving ? value / 3.6 : 0;
 }
 
 function setDriving(on) {
+  if (on === driving) return;   // trocar o dia pela noite não faz o carro recomeçar do zero
   driving = on;
   el.hud.hidden = !on;
-  document.body.classList.toggle('driving', on);
   sim.reset();
   ride.reset();
   setTarget(+el.input.value);
@@ -59,7 +52,7 @@ function setDriving(on) {
   poseSuspension(STILL);
   poseExtras(null, 0);
   for (const w of wheels) w.pivot.position.y = w.discPivot.position.y = w.centre.y;
-  tailGlass.emissiveIntensity = state.lights ? TAIL : 0;
+  setBrake(0);
   for (const rubber of Object.values(tyres)) rubber.bumpScale = rubber.userData.relief;
   showCluster(0, 'N', 0);
   discSpin.value = 0;
@@ -92,21 +85,12 @@ function updateDrive(dt) {
   discSpin.value = smooth(1, 10, sim.v);                                                                              // e os furos dos discos também
   poseExtras(sim, dt);
 
-  tailGlass.emissiveIntensity = (state.lights ? TAIL : 0) + 1.6 * smooth(0.004, 0.06, sim.brake);
+  setBrake(smooth(0.004, 0.06, sim.brake));
 
-  // painel: a velocidade, o conta-giros e o curso das suspensões acompanham cada quadro; os demais números mudam algumas vezes por segundo
-  text(el.speed, String(Math.round(sim.v * 3.6)));
-  el.bar.style.transform = `scaleX(${(sim.rpm / CAR.redline).toFixed(3)})`;
-  el.travel.forEach((node, i) => node.style.setProperty('--t', Math.max(-1, Math.min(1, ride.travel[i] / 0.03)).toFixed(2)));
-  const gear = sim.v < 0.05 && sim.target < 0.1 ? 'N' : String(sim.gear);
-  text(el.gear, gear);
-  showCluster(sim.rpm, gear, Math.round(sim.v * 3.6));
-  if ((readout -= dt) > 0) return;
-  readout = 0.12;
-  text(el.rpm, `${(Math.round(sim.rpm / 50) * 50).toLocaleString('pt-BR')} rpm`);
-  text(el.wheels, newtons(sim.wheels));
-  text(el.air, newtons(sim.air));
-  text(el.road, newtons(sim.road));
+  // a barra mostra só a velocidade; marcha e rotação ficam no painel de instrumentos do próprio carro
+  const kmh = Math.round(sim.v * 3.6);
+  text(el.speed, String(kmh));
+  showCluster(sim.rpm, sim.v < 0.05 && sim.target < 0.1 ? 'N' : String(sim.gear), kmh);
 }
 
 // Na vista interior o motorista vai junto com a carroceria: a cabine fica quase parada diante dele e é a estrada que balança.
@@ -128,6 +112,7 @@ function leaveCamera(camera) {
   camera.quaternion.copy(seat.quaternion);
 }
 
+setTarget(+el.input.value);
 el.input.addEventListener('input', () => setTarget(+el.input.value));
 window.addEventListener('keydown', (e) => {
   if (!driving || e.target === el.input || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;

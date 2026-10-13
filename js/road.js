@@ -1,15 +1,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LITE, AX_F } from './config.js';
-import { renderer, scene, pmrem } from './scene.js';
-import { studio } from './studio.js';
+import { scene } from './scene.js';
 import { std } from './materials.js';
-import { carRoot } from './layers.js';
 import { UP } from './geometry.js';
 import {
-  SUN, HAZE, seeded, hash2, fbm, smooth, paint, textureOf, sharedSky, lawnTexture, tuftTexture, treelineTexture,
+  SUN, seeded, hash2, fbm, smooth, paint, textureOf, lawnTexture, tuftTexture, treelineTexture,
 } from './praca-textures.js';
-import { cards, buildTree, treeMaterials } from './praca.js';
+import { cards, buildTree, treeMaterials, daylight } from './praca.js';
 import { LOOP, FEATURES, TO_FRONT } from './ride.js';
 
 // ---------- Estrada ----------
@@ -173,15 +171,6 @@ function buildRoad() {
   scene.add(group);
   const flat = (mesh, x, y) => { mesh.rotation.x = -Math.PI / 2; mesh.position.set(x, y, 0); group.add(mesh); return mesh; };
 
-  // céu, usado como fundo e, provisoriamente, como luz ambiente enquanto o cenário é montado
-  const sky = sharedSky();
-  scene.background = sky;
-  scene.environment = pmrem.fromEquirectangular(sky).texture;
-  scene.fog.color.copy(HAZE);
-  scene.fog.near = 60;
-  scene.fog.far = 260;
-  studio.visible = false;
-
   // sol: a sombra só precisa cobrir o carro, porque o resto do cenário passa depressa
   const sun = new THREE.DirectionalLight(0xfff0dc, 6.5), focus = new THREE.Vector3(-0.5, 0, 0);
   sun.position.copy(focus).addScaledVector(SUN, 45);
@@ -312,20 +301,8 @@ function buildRoad() {
   }
   update(0, 0);
 
-  // reflexos e luz ambiente: uma foto em 360° da estrada vazia, tirada de onde o carro fica
-  const target = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
-  const probe = new THREE.CubeCamera(0.3, 300, target);
-  probe.position.set(0, 0.9, 0);
-  carRoot.visible = false;
-  for (const holder of trees) holder.visible = false;
-  renderer.shadowMap.needsUpdate = true;
-  probe.update(renderer, scene);
-  carRoot.visible = true;
-  for (const holder of trees) holder.visible = true;
-  const env = pmrem.fromCubemap(target.texture).texture;
-  target.dispose();
-
-  return { group, sky, env, update };
+  // os reflexos são fotografados com a estrada vazia: as árvores passam, e não poderiam ficar paradas neles
+  return { group, update, dress: daylight(sun, treeline, [60, 260], trees) };
 }
 
 export { road, ensureRoad, LANE, DASH, POSTS };

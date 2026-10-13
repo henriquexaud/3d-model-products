@@ -8,15 +8,23 @@ const COLORS = [
   { name: 'Branco Pérola', hex: 0xe9e9e6 },
   { name: 'Azul Noturno', hex: 0x0d2a5c },
 ];
+// Três ambientes, cada um com a versão de dia e a de noite. `beam` é o quanto o facho dos faróis aparece no chão
+// e `glow` o tamanho do halo em volta das lentes: sob o sol quase não se nota um farol aceso
 const ENVS = [
   // ao ar livre: a praça, com o carro parado, e a estrada, com ele em movimento
-  { name: 'Praça', swatch: 'linear-gradient(#7fb2e5 55%, #5c8a3c 55%)', scenery: 'praca', exposure: 0.56, ghost: 0x16202b },
-  { name: 'Estrada', swatch: 'linear-gradient(#7fb2e5 52%, #4b4d51 52%)', scenery: 'road', exposure: 0.56, ghost: 0x16202b },
-  // estúdio: cor do piso, traço e força da malha, luz sob o carro e o degradê do fundo (horizonte, parede, teto)
-  { name: 'Estúdio', swatch: '#c9ccd2', exposure: 0.95, ghost: 0x1b2330,
-    floor: 0xb9bcc3, line: 0x4f6480, grid: 0.24, pool: 1.08, horizon: 0xd3d6db, wall: 0xb4b7be, zenith: 0x8d9097 },
-  { name: 'Noite', swatch: '#15171c', exposure: 0.8, ghost: 0xdce6ff,
-    floor: 0x0e0f13, line: 0x7f9fd0, grid: 0.09, pool: 2.2, horizon: 0x262a33, wall: 0x14161b, zenith: 0x060709 },
+  { name: 'Praça', scenery: 'praca',
+    day: { exposure: 0.56, ghost: 0x16202b, beam: 0.04, glow: 0.4 },
+    night: { exposure: 1.0, ghost: 0xdce6ff, beam: 0.45, glow: 1 } },   // o calçadão é claro e devolve bem mais luz do que o asfalto
+  { name: 'Estrada', scenery: 'road',
+    day: { exposure: 0.56, ghost: 0x16202b, beam: 0.04, glow: 0.4 },
+    night: { exposure: 1.15, ghost: 0xdce6ff, beam: 1, glow: 1 } },
+  // estúdio de projeto, branco de dia e preto à noite: cor do piso, traço e força da malha, luz sob o carro
+  // e o degradê do fundo (horizonte, parede, teto)
+  { name: 'Estúdio',
+    day: { exposure: 0.95, ghost: 0x1b2330, beam: 0.1, glow: 0.5,
+      floor: 0xe4e5e8, line: 0x5f7697, grid: 0.4, pool: 1.05, horizon: 0xf1f2f4, wall: 0xe3e5e9, zenith: 0xc6c9cf },
+    night: { exposure: 0.8, ghost: 0xdce6ff, beam: 6, glow: 1,
+      floor: 0x0a0b0d, line: 0x7f9fd0, grid: 0.09, pool: 2.2, horizon: 0x111318, wall: 0x090a0c, zenith: 0x020203 } },
 ];
 
 // Celulares e tablets recebem uma cena mais leve: vidro simples, menos folhas e grama, sombras menores
@@ -88,10 +96,13 @@ const LAYERS = [
 ];
 const layers = Object.fromEntries(LAYERS.map((L) => [L.id, L]));
 
+// O carro abre com os pontos de informação e os faróis desligados
 const state = {
-  view: 'exterior', body: 'solid', spots: true, lights: true, color: COLORS[0], env: ENVS[0], open: null, fit: 6.25,
+  view: 'exterior', body: 'solid', spots: false, lights: false, night: false, color: COLORS[0], env: ENVS[0], open: null, fit: 6.25,
   on: Object.fromEntries(LAYERS.filter((L) => L.id !== 'body').map((L) => [L.id, true])),
 };
+// Ajustes do ambiente atual na hora do dia escolhida
+const look = () => state.env[state.night ? 'night' : 'day'];
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $('status');
@@ -99,5 +110,5 @@ const hintEl = $('hint'), hintText = hintEl.firstElementChild;
 
 export {
   ASSETS, DRACO, COLORS, ENVS, LITE, X0, AX_F, AX_R, WHEEL_Y, measures, mm, meters, LAYERS, layers,
-  state, $, statusEl, hintEl, hintText,
+  state, look, $, statusEl, hintEl, hintText,
 };
