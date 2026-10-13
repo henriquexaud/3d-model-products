@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { COLORS, ENVS, X0, measures, LAYERS, state, look, $, hintEl, hintText } from './config.js';
-import { renderer, shadowsDirty, scene, studioEnv, camera, controls } from './scene.js';
+import { renderer, shadowsDirty, scene, camera, controls } from './scene.js';
 import { studio, applyStudio } from './studio.js';
 import { bodyMaterial, highlight, ghost } from './materials.js';
 import { bodyMeshes } from './layers.js';
@@ -75,7 +75,6 @@ function applyEnv() {
     set.dress(state.night);
   } else {
     showHeavens(false);
-    scene.environment = studioEnv;
     applyStudio(tune);
   }
   renderer.toneMappingExposure = tune.exposure;

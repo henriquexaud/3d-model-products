@@ -19,12 +19,13 @@ const ENVS = [
     day: { exposure: 0.56, ghost: 0x16202b, beam: 0.04, glow: 0.4 },
     night: { exposure: 1.15, ghost: 0xdce6ff, beam: 1, glow: 1 } },
   // estúdio de projeto, branco de dia e preto à noite: cor do piso, traço e força da malha, luz sob o carro
-  // e o degradê do fundo (horizonte, parede, teto)
+  // e o degradê do fundo (horizonte, parede, teto); `room` e `ground` são a cor da sala e do chão nos reflexos,
+  // `fill` o quanto dessa luz difusa chega ao piso e `key` a força do refletor principal, o único que faz sombra
   { name: 'Estúdio',
-    day: { exposure: 0.95, ghost: 0x1b2330, beam: 0.1, glow: 0.5,
-      floor: 0xe4e5e8, line: 0x5f7697, grid: 0.4, pool: 1.05, horizon: 0xf1f2f4, wall: 0xe3e5e9, zenith: 0xc6c9cf },
+    day: { exposure: 0.9, ghost: 0x1b2330, beam: 0.1, glow: 0.5,
+      floor: 0xd6d8dc, line: 0x4d6382, grid: 0.6, pool: 1.04, horizon: 0xf1f2f4, wall: 0xe3e5e9, zenith: 0xc6c9cf, room: 0x3a3d42, ground: 0x8a8d92, fill: 0.4, key: 3.2 },
     night: { exposure: 0.8, ghost: 0xdce6ff, beam: 6, glow: 1,
-      floor: 0x0a0b0d, line: 0x7f9fd0, grid: 0.09, pool: 2.2, horizon: 0x111318, wall: 0x090a0c, zenith: 0x020203 } },
+      floor: 0x0a0b0d, line: 0x7f9fd0, grid: 0.09, pool: 2.2, horizon: 0x111318, wall: 0x090a0c, zenith: 0x020203, room: 0x24262a, ground: 0x0a0b0d, fill: 1, key: 2.2 } },
 ];
 
 // Celulares e tablets recebem uma cena mais leve: vidro simples, menos folhas e grama, sombras menores

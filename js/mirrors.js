@@ -16,7 +16,7 @@ const EYE = new THREE.Vector3(-0.36, 0.98, 0.22);   // olhos do motorista, para 
 const SPECS = [
   { mesh: 'chrome:body', layer: 'body', box: [-1.122, 0.805, -0.465, -0.94, 0.925, -0.372], aim: [-0.05, -0.01, 1], wide: 1.7, clear: 0.12, size: [384, 256] },
   { mesh: 'chrome:body', layer: 'body', box: [0.94, 0.805, -0.465, 1.122, 0.925, -0.372], aim: [0.06, -0.03, 1], wide: 3, clear: 0.12, size: [384, 256] },
-  { mesh: 'chrome:interior', layer: 'interior', box: [-0.13, 1.06, -0.30, 0.116, 1.13, -0.262], aim: [0, 0.01, 1], wide: 1, clear: 0.01, size: [512, 128] },
+  { mesh: 'chrome:interior', layer: 'interior', box: [-0.13, 1.06, -0.31, 0.116, 1.13, -0.262], aim: [0, 0.01, 1], wide: 1, clear: 0.01, size: [512, 128] },
 ];
 // com a carroceria no lugar, estas camadas não aparecem nos reflexos e não precisam ser desenhadas neles
 const UNSEEN = ['chassis', 'engine', 'trans', 'exhaust', 'cooling', 'fuel', 'electric', 'susp'];

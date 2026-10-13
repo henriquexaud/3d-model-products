@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { scene, studioBackground } from './scene.js';
+import { scene, studioEnv, studioBackground } from './scene.js';
 
 // ---------- Estúdio ----------
-// Cenário vazio dos ambientes claro e escuro: piso com malha de papel de projeto e fundo infinito em degradê
+// Cenário vazio dos ambientes claro e escuro: piso com malha de papel de projeto, fundo infinito em degradê
+// e um refletor principal, que dá ao carro o brilho e as sombras que ele tem ao ar livre
 const studio = new THREE.Group();
 scene.add(studio);
 
@@ -40,6 +41,7 @@ floor.material.onBeforeCompile = (shader) => {
       diffuseColor.rgb = mix(diffuseColor.rgb, uLine, ink * uStrength);`);
 };
 floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
 studio.add(floor);
 
 // Fundo infinito: uma cúpula presa à câmera, com a faixa do horizonte mais clara, a parede e o teto mais fechado.
@@ -78,7 +80,19 @@ backdrop.frustumCulled = false;
 backdrop.renderOrder = -1;
 studio.add(backdrop);
 
-// Aplica as cores de um ambiente de estúdio (ver ENVS em config.js)
+// Refletor principal: no alto, à frente e à esquerda do carro, para a sombra cair do lado de quem chega. Ela só precisa cobrir o carro
+const key = new THREE.DirectionalLight(0xfff6ea, 0);
+key.position.set(-2.6, 8.5, -2.2);
+key.castShadow = true;
+key.shadow.mapSize.setScalar(2048);
+Object.assign(key.shadow.camera, { left: -3.5, right: 3.5, top: 3.5, bottom: -3.5, near: 2, far: 16 });
+key.shadow.camera.updateProjectionMatrix();
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.02;
+key.shadow.radius = 4;
+studio.add(key, key.target);
+
+// Aplica as cores e a luz de um ambiente de estúdio (ver ENVS em config.js)
 function applyStudio(e) {
   floor.material.color.setHex(e.floor);
   grid.uLine.value.setHex(e.line);
@@ -87,6 +101,9 @@ function applyStudio(e) {
   backdrop.material.uniforms.uHorizon.value.setHex(e.horizon);
   backdrop.material.uniforms.uWall.value.setHex(e.wall);
   backdrop.material.uniforms.uZenith.value.setHex(e.zenith);
+  key.intensity = e.key;
+  floor.material.envMapIntensity = e.fill;
+  scene.environment = studioEnv(e);
   scene.background = studioBackground.setHex(e.horizon);
   scene.fog.color.setHex(e.horizon);
 }

@@ -17,17 +17,27 @@ document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x000000, 6, 18);
 const pmrem = new THREE.PMREMGenerator(renderer);
-const studioEnv = pmrem.fromScene(studioEnvironment(), 0.03).texture, studioBackground = new THREE.Color();
+const studioBackground = new THREE.Color(), studioEnvs = new Map();
+// Luz ambiente e reflexos do estúdio de um ambiente (ver ENVS em config.js); cada um é montado na primeira vez em que é pedido
+function studioEnv(e) {
+  if (!studioEnvs.has(e)) studioEnvs.set(e, pmrem.fromScene(studioEnvironment(e.room, e.ground), 0.03).texture);
+  return studioEnvs.get(e);
+}
 
-// Estúdio fotográfico usado só para iluminação e reflexos: sala neutra com softboxes
-function studioEnvironment() {
+// Estúdio fotográfico usado só para iluminação e reflexos: sala escura, que dá contraste à pintura, chão claro ou escuro e softboxes
+function studioEnvironment(walls, ground) {
   const env = new THREE.Scene();
   const room = new THREE.Mesh(
     new THREE.BoxGeometry(24, 12, 24),
-    new THREE.MeshBasicMaterial({ color: 0x3a3d42, side: THREE.BackSide })
+    new THREE.MeshBasicMaterial({ color: walls, side: THREE.BackSide })
   );
   room.position.y = 5;
   env.add(room);
+  // o chão clareia ou escurece a parte de baixo do carro
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), new THREE.MeshBasicMaterial({ color: ground }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.9;
+  env.add(floor);
   const softbox = (w, h, intensity, pos) => {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
