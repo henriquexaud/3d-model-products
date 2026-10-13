@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visualizador 3D</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="preload" as="fetch" crossorigin href="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/models/gltf/ferrari.glb">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="views" class="glass" role="group" aria-label="Vista">
+  <button data-view="exterior" aria-pressed="true">Exterior</button>
+  <button data-view="interior" aria-pressed="false">Interior</button>
+</div>
+
+<aside id="panel" class="glass">
+  <button id="panelToggle" aria-expanded="false">Opções</button>
+  <section>
+    <h2>Cores</h2>
+    <div class="swatches" id="colors"></div>
+    <p class="label" id="colorName"></p>
+  </section>
+  <div id="more">
+    <section>
+      <h2>Ambiente</h2>
+      <div class="swatches" id="envs"></div>
+      <p class="label" id="envName"></p>
+    </section>
+    <section>
+      <h2>Destaques</h2>
+      <div class="rounds">
+        <button class="round" id="btnSpots" aria-pressed="true" title="Pontos de informação" aria-label="Pontos de informação">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>
+        </button>
+        <button class="round" id="btnLights" aria-pressed="true" title="Faróis" aria-label="Faróis">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5c4.5 0 8 3.1 8 7s-3.5 7-8 7V5z"/><path d="M3 7.5h4.5M3 12h4.5M3 16.5h4.5"/></svg>
+        </button>
+      </div>
+    </section>
+    <section>
+      <h2>Camadas</h2>
+      <p class="sub">Carroceria</p>
+      <div class="seg" id="bodyMode" role="group" aria-label="Carroceria">
+        <button data-mode="solid" aria-pressed="true">Sólida</button>
+        <button data-mode="xray" aria-pressed="false">Raio-X</button>
+        <button data-mode="hidden" aria-pressed="false">Oculta</button>
+      </div>
+      <p class="sub">Por baixo dela</p>
+      <div class="chips" id="layers"></div>
+    </section>
+    <button class="cta" id="btnSheet">Resumo</button>
+  </div>
+</aside>
+
+<div id="spots"></div>
+
+<article id="card" class="glass" hidden>
+  <button class="close" aria-label="Fechar">×</button>
+  <p class="eyebrow">Camada</p>
+  <h3></h3>
+  <p class="text"></p>
+  <dl class="specs"></dl>
+</article>
+
+<aside id="sheet" class="glass" hidden>
+  <header>
+    <button class="close" aria-label="Fechar">×</button>
+    <h3>Resumo</h3>
+  </header>
+  <div id="sheetBody"></div>
+</aside>
+
+<div id="status">Carregando modelo… 0%</div>
+<div id="hint" class="hidden"><span class="glass"></span></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
