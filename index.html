@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Visualizador 3D</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="css/style.css">
 <link rel="preload" as="fetch" crossorigin href="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/models/gltf/ferrari.glb">
 <script type="importmap">
@@ -77,6 +78,22 @@
   </header>
   <div id="sheetBody"></div>
 </aside>
+
+<section id="drive" class="glass" aria-label="Condução" hidden>
+  <div class="speedo"><output id="speedNow">0</output><small>km/h</small></div>
+  <div class="control">
+    <label for="speedInput">Velocidade desejada <output id="speedTarget">100 km/h</output></label>
+    <input id="speedInput" type="range" min="0" max="320" step="5" value="100">
+    <div class="rev" title="Marcha e rotação do motor"><b id="gearNow">N</b><i><u id="rpmBar"></u></i><span id="rpmNow">900 rpm</span></div>
+  </div>
+  <dl class="forces">
+    <dt title="Força do motor nas rodas; negativa quando o freio ou o freio-motor seguram o carro">Rodas</dt><dd id="fWheels">0 N</dd>
+    <dt title="Resistência do ar">Ar</dt><dd id="fAir">0 N</dd>
+    <dt title="Resistência de rolagem dos pneus no asfalto">Rolagem</dt><dd id="fRoad">0 N</dd>
+    <dt title="Curso de cada suspensão: o traço sobe quando ela comprime. Dianteira esquerda e direita, traseira esquerda e direita; a escala vai até 30 mm">Suspensão</dt>
+    <dd id="travel"><i></i><i></i><i></i><i></i></dd>
+  </dl>
+</section>
 
 <div id="status">Carregando modelo… 0%</div>
 <div id="hint" class="hidden"><span class="glass"></span></div>

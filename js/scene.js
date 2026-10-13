@@ -61,11 +61,4 @@ controls.addEventListener('change', () => {
   if (!c.equals(t)) { camera.position.add(c.clone().sub(t)); t.copy(c); }
 });
 
-const floor = new THREE.Mesh(
-  new THREE.CircleGeometry(40, 64),
-  new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.1 })
-);
-floor.rotation.x = -Math.PI / 2;
-scene.add(floor);
-
-export { renderer, shadowsDirty, scene, pmrem, studioEnv, studioBackground, camera, controls, floor };
+export { renderer, shadowsDirty, scene, pmrem, studioEnv, studioBackground, camera, controls };

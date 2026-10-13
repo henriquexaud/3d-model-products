@@ -34,6 +34,18 @@ function ball(p, r, mat) {
   m.position.copy(p);
   return m;
 }
+// Haste de comprimento 1, da origem até +y: `pose` a estica de um ponto a outro, e pode ser chamada a cada quadro
+function unitRod(r, mat, seg = 10, r2 = r) {
+  return new THREE.Mesh(new THREE.CylinderGeometry(r2, r, 1, seg).translate(0, 0.5, 0), mat);
+}
+const span = new THREE.Vector3();
+function pose(mesh, a, b) {
+  const len = span.subVectors(b, a).length();
+  mesh.position.copy(a);
+  mesh.quaternion.setFromUnitVectors(UP, span.divideScalar(len));
+  mesh.scale.y = len;
+  return mesh;
+}
 // Perfil retangular do ponto a ao ponto b
 function beam(a, b, w, h, mat) {
   const d = b.clone().sub(a), len = d.length();
@@ -139,4 +151,4 @@ function mergeMeshes(root) {
   }
 }
 
-export { UP, V, S, rod, cyl, rbox, ball, beam, tube, polyPipe, spring, boot, extrude, hull, mergeMeshes };
+export { UP, V, S, rod, unitRod, pose, cyl, rbox, ball, beam, tube, polyPipe, spring, boot, extrude, hull, mergeMeshes };

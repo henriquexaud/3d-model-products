@@ -4,8 +4,15 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { ASSETS, DRACO, layers, state, statusEl, hintEl } from './config.js';
 import { renderer, scene, camera, controls } from './scene.js';
 import { carRoot, prepareModel } from './layers.js';
-import { buildMechanics } from './mechanics.js';
+import { buildMechanics, finishMechanics } from './mechanics.js';
+import { buildSuspension } from './suspension.js';
+import { buildExtras } from './extras.js';
 import { praca } from './praca.js';
+import { road } from './road.js';
+import { addDetails } from './details.js';
+import { buildCluster } from './cluster.js';
+import { buildMirrors, updateMirrors, warmMirrors } from './mirrors.js';
+import { sim, ride, updateDrive, boardCamera, leaveCamera } from './drive.js';
 import { applyBodyMode, updateSpots } from './ui.js';
 
 // ---------- Modelo ----------
@@ -19,7 +26,14 @@ loader.load(
   ASSETS + 'ferrari.glb',
   (gltf) => {
     const discs = prepareModel(gltf.scene.children[0]);
-    buildMechanics(discs);
+    buildMechanics();
+    buildSuspension(discs);
+    buildExtras();
+    finishMechanics();
+    addDetails();
+    buildCluster();
+    buildMirrors();
+    warmMirrors();
 
     // Sombra de contato sob o carro
     const shadow = new THREE.Mesh(
@@ -36,7 +50,7 @@ loader.load(
     applyBodyMode();
     statusEl.remove();
     hintEl.classList.remove('hidden');
-    if (location.search.includes('debug')) window.viewer = { THREE, scene, camera, controls, renderer, carRoot, layers, state, applyBodyMode, frame, get praca() { return praca; } };
+    if (location.search.includes('debug')) window.viewer = { THREE, scene, camera, controls, renderer, carRoot, layers, state, applyBodyMode, frame, sim, ride, get praca() { return praca; }, get road() { return road; } };
   },
   (e) => {
     if (e.total) statusEl.textContent = `Carregando modelo… ${Math.round(e.loaded / e.total * 100)}%`;
@@ -47,10 +61,15 @@ loader.load(
   }
 );
 
+const clock = new THREE.Clock();
 function frame() {
   if (!renderer.domElement.width || !renderer.domElement.height) return;
   controls.update();
-  if (state.env.outdoor) {
+  updateDrive(clock.getDelta());
+  if (state.env.scenery === 'road') {
+    scene.fog.near = 60;
+    scene.fog.far = 260;
+  } else if (state.env.scenery === 'praca') {
     // ao ar livre a bruma só encobre o horizonte
     scene.fog.near = 30;
     scene.fog.far = 135;
@@ -66,7 +85,10 @@ function frame() {
     scene.fog.near = Math.max(6, camera.position.distanceTo(controls.target));
     scene.fog.far = scene.fog.near + 12;
   }
+  const aboard = state.view === 'interior' && boardCamera(camera);
+  updateMirrors(camera);
   renderer.render(scene, camera);
+  if (aboard) leaveCamera(camera);
   updateSpots();
 }
 renderer.setAnimationLoop(frame);

@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LITE, measures, meters } from './config.js';
-import { renderer, scene, pmrem, floor } from './scene.js';
+import { renderer, scene, pmrem } from './scene.js';
+import { studio } from './studio.js';
 import { castBump, std, phys } from './materials.js';
 import { carRoot } from './layers.js';
 import { UP, V, rod, rbox, ball, mergeMeshes } from './geometry.js';
 import {
-  SUN, HAZE, PAVED, seeded, hash2, fbm, smooth, skyTexture, paverTextures, lawnTexture, tuftTexture,
+  SUN, HAZE, PAVED, seeded, hash2, fbm, smooth, sharedSky, paverTextures, lawnTexture, tuftTexture,
   clumpTexture, barkTextures, woodTextures, blobTexture, treelineTexture,
 } from './praca-textures.js';
 
@@ -206,18 +207,37 @@ function buildTree(o, bark, foliage, card) {
   return tree;
 }
 
+// Materiais e cartões de folha das árvores, os mesmos em todos os cenários
+let treeKit = null;
+function treeMaterials() {
+  if (treeKit) return treeKit;
+  const barkMaps = barkTextures();
+  const bark = std({ map: barkMaps.map, bumpMap: barkMaps.bump, bumpScale: 2.5, roughness: 0.95 });
+  // um pouco de luz atravessa as folhas, por isso elas nunca ficam totalmente escuras
+  const foliage = phys({ map: clumpTexture(), alphaTest: 0.5, alphaToCoverage: true, roughness: 0.9, specularIntensity: 0.15, emissive: 0x3f5427, emissiveIntensity: 0.5 });
+  foliage.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 aSphere;')
+      .replace('#include <defaultnormal_vertex>', `#include <defaultnormal_vertex>
+        transformedNormal = normalMatrix * normalize(mix(normalize(mat3(instanceMatrix) * objectNormal), normalize(aSphere), 0.8));`);
+  };
+  // mancha no chão que faz o papel da sombra das árvores que ficam fora do mapa de sombras
+  const blob = new THREE.MeshBasicMaterial({ map: blobTexture(), color: 0x0c1408, transparent: true, opacity: 0.5, depthWrite: false });
+  return treeKit = { bark, foliage, blob, fineCard: cards(0.95, 1, true), coarseCard: cards(0.95, 1, false) };
+}
+
 function buildPraca() {
   const group = new THREE.Group(), rand = seeded(90);
   scene.add(group);
 
   // céu, usado como fundo e, provisoriamente, como luz ambiente enquanto o cenário é montado
-  const sky = skyTexture();
+  const sky = sharedSky();
   scene.background = sky;
   scene.environment = pmrem.fromEquirectangular(sky).texture;
   scene.fog.color.copy(HAZE);
   scene.fog.near = 30;
   scene.fog.far = 135;
-  floor.visible = false;
+  studio.visible = false;
 
   // sol
   const sun = new THREE.DirectionalLight(0xfff0dc, 6.5), focus = new THREE.Vector3(-0.5, 0, -1);
@@ -288,18 +308,7 @@ function buildPraca() {
   group.add(bench, other);
 
   // árvores: três de perto, com sombra de verdade, e outras ao longo do calçadão e pelo parque
-  const barkMaps = barkTextures();
-  const bark = std({ map: barkMaps.map, bumpMap: barkMaps.bump, bumpScale: 2.5, roughness: 0.95 });
-  // um pouco de luz atravessa as folhas, por isso elas nunca ficam totalmente escuras
-  const foliage = phys({ map: clumpTexture(), alphaTest: 0.5, alphaToCoverage: true, roughness: 0.9, specularIntensity: 0.15, emissive: 0x3f5427, emissiveIntensity: 0.5 });
-  foliage.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 aSphere;')
-      .replace('#include <defaultnormal_vertex>', `#include <defaultnormal_vertex>
-        transformedNormal = normalMatrix * normalize(mix(normalize(mat3(instanceMatrix) * objectNormal), normalize(aSphere), 0.8));`);
-  };
-  const fineCard = cards(0.95, 1, true), coarseCard = cards(0.95, 1, false);
-  const blob = new THREE.MeshBasicMaterial({ map: blobTexture(), color: 0x0c1408, transparent: true, opacity: 0.5, depthWrite: false });
+  const { bark, foliage, blob, fineCard, coarseCard } = treeMaterials();
   const trees = [];
   const plant = (x, z, close, seed) => {
     const tree = buildTree(close
@@ -342,4 +351,4 @@ function buildPraca() {
   return { group, sky, env, trees };
 }
 
-export { praca, ensurePraca };
+export { praca, ensurePraca, cards, buildTree, treeMaterials };

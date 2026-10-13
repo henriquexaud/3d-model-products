@@ -303,7 +303,11 @@ function treelineTexture() {
   }));
 }
 
+// O céu é o mesmo na praça e na estrada, então é pintado uma vez só
+let sky = null;
+const sharedSky = () => (sky ??= skyTexture());
+
 export {
-  SUN, HAZE, PAVED, seeded, hash2, fbm, smooth, skyTexture, paverTextures, lawnTexture, tuftTexture,
+  SUN, HAZE, PAVED, seeded, hash2, fbm, smooth, paint, textureOf, sharedSky, paverTextures, lawnTexture, tuftTexture,
   clumpTexture, barkTextures, woodTextures, blobTexture, treelineTexture,
 };

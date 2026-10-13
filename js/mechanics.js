@@ -1,14 +1,22 @@
 import * as THREE from 'three';
-import { X0, AX_F, AX_R, WHEEL_Y, measures, mm, LAYERS } from './config.js';
+import { AX_R, WHEEL_Y, measures, LAYERS } from './config.js';
 import { mats } from './materials.js';
 import { G } from './layers.js';
-import {
-  V, S, rod, cyl, rbox, ball, beam, tube, polyPipe, spring, boot, extrude, hull, mergeMeshes,
-} from './geometry.js';
+import { V, S, rod, cyl, rbox, beam, tube, polyPipe, extrude, hull, mergeMeshes } from './geometry.js';
 
 // ---------- Peças mecânicas ----------
-// Tudo em metros, nas proporções reais de um esportivo V8 de motor central, encaixado nos vãos do modelo
-function buildMechanics(discBoxes) {
+// Tudo em metros, nas proporções reais de um esportivo V8 de motor central, encaixado nos vãos do modelo.
+// Aqui ficam as peças paradas; as que se movem estão em suspension.js e extras.js
+
+// Motor V8 a 90°: virabrequim ao longo de z, a 335 mm do solo; bloco entre z = 0,62 e z = 1,10
+const CY = 0.335, Z0 = 0.62, LEN = 0.48, ZC = Z0 + LEN / 2;
+const zCyl = [0, 1, 2, 3].map((i) => Z0 + 0.084 + i * 0.104);   // centros dos cilindros, a cada 104 mm
+const bankZ = (s) => (s < 0 ? -0.02 : 0);                        // a bancada esquerda fica 20 mm à frente
+const ENGINE = { CY, Z0, LEN, ZC, zCyl, bankZ };
+// Onde as linhas rígidas de freio terminam e começam os flexíveis de cada roda
+const BRAKE_BRACKETS = { front: { '-1': V(-0.47, 0.545, -1.345), 1: V(0.47, 0.545, -1.345) }, rear: { '-1': V(-0.49, 0.50, 1.33), 1: V(0.49, 0.50, 1.33) } };
+
+function buildMechanics() {
   { // Chassi: estrutura tubular de alumínio
     const g = G('chassis'), m = mats('chassis');
     for (const s of S) {
@@ -46,10 +54,6 @@ function buildMechanics(discBoxes) {
     g.add(tube([[-0.58, 0.66, 2.07], [-0.35, 0.66, 2.12], [0, 0.66, 2.145], [0.35, 0.66, 2.12], [0.58, 0.66, 2.07]], 0.035, m.aluSatin, 12));
   }
 
-  // Motor V8 a 90°: virabrequim ao longo de z, a 335 mm do solo; bloco entre z = 0,62 e z = 1,10
-  const CY = 0.335, Z0 = 0.62, LEN = 0.48, ZC = Z0 + LEN / 2;
-  const zCyl = [0, 1, 2, 3].map((i) => Z0 + 0.084 + i * 0.104);   // centros dos cilindros, a cada 104 mm
-  const bankZ = (s) => (s < 0 ? -0.02 : 0);                        // a bancada esquerda fica 20 mm à frente
   {
     const g = G('engine'), m = mats('engine');
     const block = extrude([[-0.11, -0.12], [0.11, -0.12], [0.15, -0.06], [0.15, 0.02], [0.1874, 0.0954], [0.0954, 0.1874],
@@ -123,14 +127,10 @@ function buildMechanics(discBoxes) {
     g.add(cyl(0.10, 0.03, 'z', 0, 0.37, 1.855, m.aluSatin, 20));
     g.add(rbox(0.20, 0.05, 0.24, 0, 0.555, 1.47, m.black, 0.01));                    // unidade de comando
     g.add(rbox(0.05, 0.03, 0.04, 0.06, 0.59, 1.40, m.black, 0.005));
-    for (const s of S) {                                                             // semieixos, alinhados com as rodas
+    for (const s of S) {                                                             // saídas do diferencial para os semieixos
       const at = (x) => V(s * x, WHEEL_Y, AX_R);
       g.add(rod(at(0.18), at(0.21), 0.055, m.steel, 0.055, 18));
       g.add(rod(at(0.21), at(0.28), 0.045, m.steel, 0.045, 18));
-      g.add(boot(at(0.28), at(0.35), 0.042, 0.02, m.rubber));
-      g.add(rod(at(0.35), at(0.62), 0.016, m.steel));
-      g.add(boot(at(0.69), at(0.62), 0.042, 0.02, m.rubber));
-      g.add(rod(at(0.69), at(0.75), 0.045, m.steel, 0.045, 18));
     }
   }
 
@@ -172,13 +172,6 @@ function buildMechanics(discBoxes) {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.01, 6, 28), m.black);  // eletroventilador
       ring.position.z = 0.05;
       rad.add(ring, cyl(0.035, 0.04, 'z', 0, 0, 0.05, m.black, 14));
-      for (let k = 0; k < 7; k++) {
-        const a = k * Math.PI * 2 / 7, blade = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.036, 0.003), m.black);
-        blade.position.set(Math.cos(a) * 0.082, Math.sin(a) * 0.082, 0.05);
-        blade.rotation.z = a;
-        blade.rotateX(0.5);
-        rad.add(blade);
-      }
       const pipe = polyPipe([[s * 0.29, 0.47, -1.91], [s * 0.25, 0.39, -1.87], [s * 0.10, 0.37, -1.84], [s * 0.045, 0.37, -1.76],
         [s * 0.045, 0.37, -1.40], [s * 0.03, 0.335, -1.28], [s * 0.026, 0.26, -1.13], [s * 0.026, 0.245, -1.03], [s * 0.026, 0.245, 0.40],
         [s * 0.07, 0.25, 0.50], [s * 0.115, 0.30, 0.535], [s * 0.115, 0.44, 0.538], [s * 0.10, 0.53, 0.545], [s * 0.07, 0.56, 0.58],
@@ -244,99 +237,8 @@ function buildMechanics(discBoxes) {
     for (const s of S) g.add(polyPipe([[0, 0.60, 0.54], [s * 0.06, 0.635, 0.545], [s * 0.14, 0.66, 0.555]], 0.008, m.black, 0.02, 6));
   }
 
-  { // Suspensão e direção
-    const g = G('susp'), m = mats('susp');
-    const joint = (p, r = 0.02) => g.add(ball(p, r, m.steel));
-    const bush = (p, r = 0.024) => g.add(cyl(r, 0.05, 'z', p.x, p.y, p.z, m.rubber, 12));
-    const arm = (a, b, r) => g.add(rod(a, b, r, m.alu, r, 10));
-    // mola e amortecedor em um só conjunto, do braço inferior à estrutura
-    const coilover = (low, top) => {
-      const d = top.clone().sub(low), at = (t) => low.clone().addScaledVector(d, t);
-      g.add(rod(low, at(0.56), 0.023, m.darkSteel, 0.023, 14));
-      g.add(rod(at(0.56), top, 0.007, m.steel, 0.007, 8));
-      g.add(rod(at(0.40), at(0.42), 0.046, m.aluSatin, 0.046, 18));
-      g.add(spring(at(0.42), at(0.955), 0.036, 0.006, 7, m.spring));
-      g.add(rod(at(0.955), top, 0.048, m.darkSteel, 0.048, 18));
-      joint(low);
-    };
-    for (const s of S) {
-      // dianteira
-      const lbj = V(s * 0.755, 0.185, AX_F), ubj = V(s * 0.725, 0.535, AX_F - 0.01), tie = V(s * 0.745, 0.275, AX_F - 0.145);
-      g.add(cyl(0.07, 0.07, 'x', s * 0.765, WHEEL_Y, AX_F, m.alu, 20));              // manga de eixo
-      g.add(rod(V(s * 0.76, 0.31, AX_F), lbj, 0.028, m.alu, 0.02, 10));
-      g.add(rod(V(s * 0.755, 0.41, AX_F), ubj, 0.028, m.alu, 0.018, 10));
-      g.add(rod(V(s * 0.76, 0.33, AX_F - 0.05), tie, 0.02, m.alu, 0.014, 8));
-      [lbj, ubj, tie].forEach((p) => joint(p));
-      const f1 = V(s * 0.40, 0.205, -1.36), f2 = V(s * 0.40, 0.205, -1.14);          // braço inferior
-      arm(lbj, f1, 0.017); arm(lbj, f2, 0.017); bush(f1); bush(f2);
-      const u1 = V(s * 0.50, 0.555, -1.30), u2 = V(s * 0.50, 0.555, -1.14);          // braço superior
-      arm(ubj, u1, 0.014); arm(ubj, u2, 0.014); bush(u1, 0.022); bush(u2, 0.022);
-      coilover(V(s * 0.64, 0.21, -1.215), V(s * 0.50, 0.70, -1.205));
-      g.add(boot(V(s * 0.30, 0.275, -1.30), V(s * 0.40, 0.275, -1.30), 0.027, 0.014, m.rubber, 5));   // barra de direção
-      g.add(rod(V(s * 0.40, 0.275, -1.30), V(s * 0.70, 0.275, -1.30), 0.008, m.steel, 0.008, 8));
-      g.add(rod(V(s * 0.70, 0.275, -1.30), tie, 0.011, m.darkSteel, 0.011, 8));
-      g.add(tube([[s * 0.36, 0.305, -1.395], [s * 0.44, 0.305, -1.39], [s * 0.50, 0.305, -1.34], [s * 0.52, 0.305, -1.25]], 0.012, m.darkSteel)); // estabilizadora
-      g.add(rod(V(s * 0.52, 0.305, -1.25), V(s * 0.56, 0.21, -1.265), 0.006, m.steel, 0.006, 6));
-      g.add(rbox(0.05, 0.04, 0.04, s * 0.36, 0.285, -1.395, m.rubber, 0.006));
-
-      // traseira
-      const rl = V(s * 0.735, 0.19, AX_R), ru = V(s * 0.705, 0.535, AX_R + 0.004), toe = V(s * 0.72, 0.30, AX_R + 0.159);
-      g.add(cyl(0.07, 0.07, 'x', s * 0.745, WHEEL_Y, AX_R, m.alu, 20));
-      g.add(rod(V(s * 0.74, 0.31, AX_R), rl, 0.028, m.alu, 0.02, 10));
-      g.add(rod(V(s * 0.735, 0.41, AX_R), ru, 0.028, m.alu, 0.018, 10));
-      g.add(rod(V(s * 0.74, 0.33, AX_R + 0.05), toe, 0.02, m.alu, 0.014, 8));
-      [rl, ru, toe].forEach((p) => joint(p));
-      const r1 = V(s * 0.47, 0.225, 1.31), r2 = V(s * 0.47, 0.225, 1.71);
-      arm(rl, r1, 0.017); arm(rl, r2, 0.017); bush(r1); bush(r2);
-      const q1 = V(s * 0.50, 0.56, 1.40), q2 = V(s * 0.50, 0.56, 1.76);
-      arm(ru, q1, 0.014); arm(ru, q2, 0.014); bush(q1, 0.022); bush(q2, 0.022);
-      coilover(V(s * 0.65, 0.215, 1.57), V(s * 0.50, 0.80, 1.585));
-      g.add(rod(toe, V(s * 0.47, 0.30, 1.70), 0.011, m.steel, 0.011, 8));            // braço de convergência
-      joint(V(s * 0.47, 0.30, 1.70), 0.016);
-      g.add(tube([[s * 0.36, 0.555, 1.79], [s * 0.42, 0.557, 1.785], [s * 0.44, 0.565, 1.74], [s * 0.44, 0.58, 1.66]], 0.011, m.darkSteel));
-      g.add(rod(V(s * 0.44, 0.58, 1.66), V(s * 0.53, 0.557, 1.72), 0.006, m.steel, 0.006, 6));
-    }
-    g.add(rod(V(-0.36, 0.305, -1.395), V(0.36, 0.305, -1.395), 0.012, m.darkSteel));  // estabilizadoras
-    g.add(rod(V(-0.36, 0.555, 1.79), V(0.36, 0.555, 1.79), 0.011, m.darkSteel));
-    g.add(cyl(0.0275, 0.60, 'x', 0, 0.275, -1.30, m.alu, 16));                       // caixa de direção
-    g.add(rod(V(-0.27, 0.275, -1.30), V(-0.295, 0.335, -1.262), 0.022, m.alu));
-    // coluna: do volante até a parede dianteira e de lá, por um eixo articulado, à caixa de direção
-    g.add(rod(V(-0.346, 0.776, -0.52), V(-0.346, 0.60, -1.03), 0.022, m.black, 0.022, 12));
-    g.add(rod(V(-0.346, 0.60, -1.03), V(-0.346, 0.59, -1.06), 0.012, m.steel, 0.012, 8));
-    joint(V(-0.346, 0.59, -1.06), 0.018);
-    g.add(rod(V(-0.346, 0.59, -1.06), V(-0.30, 0.345, -1.255), 0.011, m.steel, 0.011, 8));
-    joint(V(-0.30, 0.345, -1.255), 0.018);
-  }
-
-  { // Freios: pinças sobre os discos do modelo, servo-freio, ABS e linhas até as rodas
+  { // Freios: servo-freio, ABS e linhas rígidas até perto de cada roda
     const g = G('brakes'), m = mats('brakes');
-    const hoses = [];
-    for (const box of discBoxes) {
-      const s = Math.sign(box.min.x + box.max.x), front = box.min.z < 0;
-      const r = (box.max.y - box.min.y) / 2, cy = (box.min.y + box.max.y) / 2, cz = (box.min.z + box.max.z) / 2;
-      const inner = Math.min(Math.abs(box.min.x), Math.abs(box.max.x)) - s * X0;
-      const outer = Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) - s * X0;
-      measures[front ? 'discF' : 'discR'] = `Ø ${mm(2 * r)} × ${mm(outer - inner)} mm`;
-      // pinça fixa abraçando a borda do disco, à frente do eixo
-      const span = front ? 1.15 : 0.95, r1 = r - 0.085, r2 = r + 0.035, a0 = Math.PI - span / 2, a1 = Math.PI + span / 2;
-      const depthIn = front ? 0.055 : 0.048, x0 = inner - depthIn, x1 = outer + 0.008;
-      const shape = new THREE.Shape();
-      shape.moveTo(r2 * Math.cos(a0), r2 * Math.sin(a0));
-      shape.absarc(0, 0, r2, a0, a1, false);
-      shape.lineTo(r1 * Math.cos(a1), r1 * Math.sin(a1));
-      shape.absarc(0, 0, r1, a1, a0, true);
-      const caliper = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {
-        depth: x1 - x0, bevelEnabled: true, bevelSize: 0.004, bevelOffset: -0.004, bevelThickness: 0.004, bevelSegments: 2, curveSegments: 16,
-      }), m.caliper);
-      caliper.rotation.y = -Math.PI / 2;                                             // o perfil fica no plano da roda
-      caliper.position.set(s > 0 ? x1 : -x0, cy, cz);
-      g.add(caliper);
-      for (let k = 0; k < (front ? 3 : 2); k++) {                                    // pistões
-        const a = Math.PI + (k - (front ? 1 : 0.5)) * 0.36;
-        g.add(cyl(0.022, 0.014, 'x', s * (x0 - 0.005), cy + (r - 0.035) * Math.sin(a), cz + (r - 0.035) * Math.cos(a), m.steel, 12));
-      }
-      hoses.push({ s, front, end: V(s * (x0 - 0.008), cy + 0.02, cz - (r - 0.03)) });
-    }
     g.add(cyl(0.12, 0.10, 'z', -0.19, 0.52, -1.195, m.darkSteel, 28));               // servo-freio
     g.add(cyl(0.10, 0.02, 'z', -0.19, 0.52, -1.255, m.darkSteel, 28));
     g.add(cyl(0.022, 0.14, 'z', -0.19, 0.52, -1.33, m.alu, 12));                     // cilindro-mestre
@@ -348,24 +250,21 @@ function buildMechanics(discBoxes) {
     const line = (pts) => g.add(polyPipe(pts, 0.003, m.copper, 0.02, 5));
     for (const o of [-0.012, 0.012]) line([[-0.19 + o, 0.50, -1.37], [-0.20 + o, 0.44, -1.44], [-0.25 + o, 0.40, -1.50], [-0.25 + o, 0.375, -1.52]]);
     // dianteiras: sobem para as longarinas e descem por um flexível até cada pinça
-    const bracketF = { '-1': V(-0.47, 0.545, -1.345), '1': V(0.47, 0.545, -1.345) };
+    const bracketF = BRAKE_BRACKETS.front, bracketR = BRAKE_BRACKETS.rear;
     line([[-0.28, 0.375, -1.50], [-0.34, 0.45, -1.46], [-0.44, 0.545, -1.40], bracketF[-1]]);
     line([[-0.24, 0.375, -1.50], [-0.10, 0.47, -1.47], [0.34, 0.47, -1.47], [0.44, 0.545, -1.40], bracketF[1]]);
     // traseiras: túnel central, parede atrás dos bancos e longarinas superiores
-    const bracketR = { '-1': V(-0.49, 0.50, 1.33), '1': V(0.49, 0.50, 1.33) };
     for (const s of S) {
       const x = -0.039 + s * 0.005;
       line([[-0.25 + s * 0.01, 0.375, -1.545], [-0.14, 0.40, -1.42], [-0.075, 0.40, -1.30], [-0.06, 0.34, -1.16], [x, 0.305, -1.06],
         [x, 0.305, 0.40], [x, 0.33, 0.52], [x, 0.80, 0.545], [s * 0.42, 0.80, 0.555], [s * 0.455, 0.733, 0.62], [s * 0.455, 0.733, 1.25], bracketR[s]]);
     }
-    for (const h of hoses) {                                                         // flexíveis
-      const from = (h.front ? bracketF : bracketR)[h.s], mid = from.clone().lerp(h.end, 0.5);
-      mid.y += 0.03; mid.z -= 0.03;
-      g.add(tube([from, mid, h.end], 0.005, m.rubber, 6));
-    }
   }
+}
 
+// Funde as peças paradas de cada camada, depois que todos os módulos acrescentaram as suas
+function finishMechanics() {
   for (const L of LAYERS) if (L.mech) mergeMeshes(L.mech);
 }
 
-export { buildMechanics };
+export { ENGINE, BRAKE_BRACKETS, buildMechanics, finishMechanics };

@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { COLORS, ENVS, X0, measures, LAYERS, layers, state, $, hintText } from './config.js';
-import {
-  renderer, shadowsDirty, scene, studioEnv, studioBackground, camera, controls, floor,
-} from './scene.js';
+import { renderer, shadowsDirty, scene, studioEnv, camera, controls } from './scene.js';
+import { studio, applyStudio } from './studio.js';
 import { bodyMaterial, LIGHTS, highlight, ghost } from './materials.js';
 import { bodyMeshes } from './layers.js';
 import { HAZE } from './praca-textures.js';
 import { praca, ensurePraca } from './praca.js';
+import { road, ensureRoad } from './road.js';
+import { CAR } from './physics.js';
+import { RIDE, SPRUNG, CORNERS } from './ride.js';
+import { setDriving } from './drive.js';
 
 // ---------- Interface ----------
 function buildSwatches(containerId, labelId, items, toCss, apply) {
@@ -29,25 +32,27 @@ function buildSwatches(containerId, labelId, items, toCss, apply) {
 buildSwatches('colors', 'colorName', COLORS,
   (c) => '#' + c.hex.toString(16).padStart(6, '0'),
   (c) => { state.color = c; bodyMaterial.color.setHex(c.hex); });
-// Ambiente: a praça, com céu, sol e cenário, ou o estúdio claro ou escuro
+// Ambiente: a praça ou a estrada, com céu, sol e cenário, ou o estúdio claro ou escuro
 function applyEnv(e) {
   state.env = e;
-  if (e.outdoor) ensurePraca();
-  if (praca) praca.group.visible = !!e.outdoor;
-  floor.visible = !e.outdoor;
-  if (e.outdoor) {
-    scene.background = praca.sky;
-    scene.environment = praca.env;
+  // um cenário novo é montado com os outros escondidos, para não aparecerem nos reflexos dele
+  if (praca) praca.group.visible = false;
+  if (road) road.group.visible = false;
+  const set = e.scenery === 'praca' ? ensurePraca() : e.scenery === 'road' ? ensureRoad() : null;
+  studio.visible = !set;
+  if (set) {
+    set.group.visible = true;
+    scene.background = set.sky;
+    scene.environment = set.env;
     scene.fog.color.copy(HAZE);
   } else {
-    scene.background = studioBackground.setHex(e.bg);
     scene.environment = studioEnv;
-    scene.fog.color.setHex(e.bg);
-    floor.material.color.setHex(e.floor);
+    applyStudio(e);
   }
   renderer.toneMappingExposure = e.exposure;
   ghost.uniforms.uColor.value.setHex(e.ghost);
-  if (state.view === 'exterior') controls.maxDistance = Math.max(e.outdoor ? 16 : 9, state.fit * 1.3);
+  if (state.view === 'exterior') controls.maxDistance = Math.max(set ? 16 : 9, state.fit * 1.3);
+  setDriving(e.scenery === 'road');
   shadowsDirty();
 }
 buildSwatches('envs', 'envName', ENVS, (e) => e.swatch, applyEnv);
@@ -80,7 +85,7 @@ function setView(view) {
     controls.target.set(0, 0.5, 0);
     camera.position.set(4.25, 0.9, -4.5).setLength(distance).add(controls.target);
     state.fit = distance;
-    controls.maxDistance = Math.max(state.env.outdoor ? 16 : 9, distance * 1.3);   // na praça dá para recuar e ver o cenário
+    controls.maxDistance = Math.max(state.env.scenery ? 16 : 9, distance * 1.3);   // ao ar livre dá para recuar e ver o cenário
     controls.minPolarAngle = 0;
     controls.maxPolarAngle = THREE.MathUtils.degToRad(88);
     controls.rotateSpeed = 1;
@@ -245,9 +250,24 @@ function openSheet() {
     add('h5', L.name);
     specs(L.specs);
   }
-  if (state.env.outdoor) {
+  if (state.env.scenery === 'praca') {
     add('h5', 'Cenário da praça');
     specs([['Banco', measures.bench], ['Assento', '44 cm do chão'], ['Árvore', measures.tree], ['Tronco', 'Ø 40 cm'], ['Blocos do piso', '20 × 10 cm']]);
+  }
+  if (state.env.scenery === 'road') {
+    add('h5', 'Cenário da estrada');
+    specs([['Faixas', '2 × 3,60 m'], ['Acostamentos', '2,50 m e 0,60 m'], ['Linha tracejada', 'traço de 4 m a cada 16 m'],
+      ['Largura das linhas', '15 cm'], ['Defensa metálica', '75 cm de altura, postes a cada 4 m']]);
+    add('h5', 'Como o movimento é calculado');
+    specs([['Massa com motorista', `${CAR.mass.toLocaleString('pt-BR')} kg`], ['Arrasto do ar (Cx × área)', '0,36 × 2,03 m²'],
+      ['Pressão aerodinâmica', '140 kg a 200 km/h'], ['Rolagem dos pneus', '1,1% do peso, mais a cada km/h'],
+      ['Aderência dos pneus', `${CAR.grip.toLocaleString('pt-BR')} g`], ['Câmbio', `${CAR.gears.length} marchas, diferencial ${CAR.finalDrive.toLocaleString('pt-BR')}`],
+      ['Velocidade máxima', `${Math.round(CAR.topSpeed * 3.6)} km/h`]]);
+    add('h5', 'Como a suspensão é calculada');
+    specs([['Massa apoiada nas molas', `${SPRUNG.toLocaleString('pt-BR')} kg`], ['Massa de cada roda diant. / tras.', `${RIDE.unsprung[0]} / ${RIDE.unsprung[2]} kg`],
+      ['Molas, medidas na roda', `${Math.round(CORNERS[0].k / 1000)} / ${Math.round(CORNERS[2].k / 1000)} N/mm`],
+      ['Amortecimento', `${Math.round(RIDE.damping * 100)}% do crítico nos movimentos lentos`], ['Pneu', `${RIDE.tyre / 1000} N/mm`],
+      ['Relevo da pista', 'Asfalto bom (ISO 8608, classes A–B)'], ['Irregularidades', 'Juntas de 8 mm, remendos de 6 mm e uma depressão de 16 mm']]);
   }
   closeCard();
   sheet.hidden = false;
