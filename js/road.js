@@ -372,10 +372,11 @@ function* buildRoad(road) {
 
   // árvores dos dois lados, perto o bastante da pista para ficarem inteiras quando passam; cada uma volta para o começo
   // depois de passar, e só é desenhada enquanto está ao alcance
-  const kit = treeMaterials(), trees = [], count = LITE ? 16 : 28;
+  // árvores simples e paradas: passam correndo, e de longe não se nota a diferença
+  const kit = treeMaterials(false), trees = [], count = LITE ? 16 : 26;
   for (let i = 0; i < count; i++) {
     const seed = 40 + i, out = 7 + 20 * Math.pow(hash2(seed, 5), 1.3);
-    const tree = buildTree({ seed, height: 6.5 + hash2(seed, 1) * 3, trunk: 0.19, sides: 8, leaves: LITE ? 300 : 520, leaf: 1.1 },
+    const tree = buildTree({ seed, height: 6.5 + hash2(seed, 1) * 3, trunk: 0.2, sides: 6, coarse: true, leaves: LITE ? 200 : 340, leaf: 1.3 },
       kit.bark, kit.foliage, kit.coarseCard);
     tree.rotation.y = hash2(seed, 2) * 6.28;
     const shade = new THREE.Mesh(new THREE.PlaneGeometry(tree.userData.crown * 1.1, tree.userData.crown * 1.1), kit.blob);

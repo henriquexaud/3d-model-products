@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LITE, measures, meters } from './config.js';
 import { renderer, scene, sceneries, surroundings, skyEnv } from './scene.js';
-import { castBump, std, phys } from './materials.js';
+import { castBump, std } from './materials.js';
 import { carRoot } from './layers.js';
 import { dimLamps } from './lamps.js';
 import { UP, V, rod, rbox, ball, mergeMeshes } from './geometry.js';
@@ -14,7 +14,7 @@ import {
 import { DUSK, NIGHT_HAZE, SUNLIGHT, MOONLIGHT, nightSky, showHeavens } from './night.js';
 import { Sketch, outline, paperFloor, groundFade, sprout, materialize, castsAsDrawn, progressAt, setReach, dressPlan, whole } from './blueprint.js';
 import { prepare, strip } from './post.js';
-import { schedule } from './pace.js';
+import { schedule, invalidate } from './pace.js';
 
 // ---------- Praça ----------
 // Cenário externo gerado por código, em metros: céu, sol com sombras, calçadão de blocos, gramado, bancos, árvores e postes
@@ -157,27 +157,77 @@ function buildBench() {
 }
 
 // Árvore de copa arredondada: tronco e galhos em tubos que afinam, folhas em cartões espalhados pelos ramos finos.
+// Cartão de folhas recortado no formato do raminho desenhado em `canvas`: em vez de um retângulo, uma faixa que em cada
+// altura só é tão larga quanto as folhas. Os cantos vazios, que a placa de vídeo teria de testar ponto a ponto e jogar fora,
+// deixam de existir. Um lado só: o material das folhas é visível dos dois lados
+function sprigCard(canvas, w, h, crossed, bands = 4) {
+  const W = canvas.width, H = canvas.height, data = canvas.getContext('2d').getImageData(0, 0, W, H).data;
+  let top = H, bottom = 0;
+  const lo = new Array(H).fill(W), hi = new Array(H).fill(-1);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (data[(y * W + x) * 4 + 3] > 60) {
+    if (x < lo[y]) lo[y] = x;
+    hi[y] = x;
+    top = Math.min(top, y);
+    bottom = Math.max(bottom, y);
+  }
+  top = Math.max(0, top - 2);
+  bottom = Math.min(H - 1, bottom + 2);
+  // largura de cada faixa e, nas divisas, a maior das duas vizinhas: a borda reta entre elas nunca corta uma folha
+  const span = [];
+  for (let k = 0; k < bands; k++) {
+    let l = W, r = 0;
+    for (let y = Math.floor(top + (bottom - top) * k / bands); y <= Math.ceil(top + (bottom - top) * (k + 1) / bands); y++) {
+      if (hi[y] < 0) continue;
+      l = Math.min(l, lo[y]);
+      r = Math.max(r, hi[y]);
+    }
+    span.push(r < l ? [W / 2, W / 2] : [Math.max(0, l - 3), Math.min(W, r + 4)]);
+  }
+  const P = [], U = [], I = [];
+  for (let k = 0; k <= bands; k++) {
+    const near = [span[Math.max(0, k - 1)], span[Math.min(bands - 1, k)]];
+    const l = Math.min(near[0][0], near[1][0]) / W, r = Math.max(near[0][1], near[1][1]) / W;
+    const v = 1 - (top + (bottom - top) * k / bands) / H;   // a imagem vai para a placa de cabeça para baixo
+    P.push((l - 0.5) * w, v * h, 0, (r - 0.5) * w, v * h, 0);
+    U.push(l, v, r, v);
+    // de cima para baixo: esquerda, direita, e as duas da divisa seguinte; os triângulos ficam de frente para +z
+    if (k < bands) I.push(2 * k, 2 * k + 2, 2 * k + 1, 2 * k + 1, 2 * k + 2, 2 * k + 3);
+  }
+  const plane = new THREE.BufferGeometry();
+  plane.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  plane.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+  plane.setAttribute('normal', new THREE.Float32BufferAttribute(P.map((_, i) => (i % 3 === 2 ? 1 : 0)), 3));
+  plane.setIndex(I);
+  return crossed ? mergeGeometries([plane, plane.clone().rotateY(Math.PI / 2)]) : plane;
+}
+
 // Ela também traz o próprio desenho: o eixo do tronco e dos galhos e o contorno de parte das folhas, exatamente onde o volume
 // vai aparecer. Com `sketchOnly`, ela é só o desenho, para ficar além do raio
 function buildTree(o, bark, foliage, card) {
   const rand = seeded(o.seed), P = [], N = [], U = [], I = [], anchors = [], limbs = [];
   const a = new THREE.Vector3(), b = new THREE.Vector3(), n = new THREE.Vector3();
-  const lengths = [o.height * 0.31, o.height * 0.37, o.height * 0.23, o.height * 0.13];
-  (function grow(start, dir, r0, level) {
-    const len = lengths[level] * (0.85 + rand() * 0.3), steps = [8, 7, 5, 4][level], sides = Math.max(4, o.sides - level * 3);
-    const pts = [start.clone()], dirs = [dir.clone()], d = dir.clone(), wobble = level === 0 ? 0.07 : 0.22;
+  // O modelo de uma árvore de praça de folha larga: tronco curto e grosso, que alarga em raízes na base e se abre, a um
+  // terço da altura, em três pernadas e na continuação do tronco; cada pernada se divide em galhos, e os galhos em ramos
+  // finos, sempre mais curtos perto da ponta, o que arredonda a copa. Os galhos nascem um pouco por dentro do pai, para não
+  // ficar emenda à vista, e toda ponta termina em um tufo de folhas: não sobra galho seco espetado para fora da copa
+  const lengths = [o.height * 0.34, o.height * 0.42, o.height * 0.25, o.height * 0.12];
+  const STEPS = o.coarse ? [6, 5, 3, 2] : [9, 7, 5, 3];
+  (function grow(start, dir, r0, level, scale, peel = 0, ring = 0) {
+    const len = lengths[level] * scale * (0.85 + rand() * 0.3), steps = STEPS[level], sides = Math.max(4, o.sides - level * 3);
+    const pts = [start.clone()], dirs = [dir.clone()], d = dir.clone();
+    const wobble = [0.05, 0.14, 0.2, 0.26][level], lift = [0.012, 0.075, 0.025, -0.05][level];
     for (let i = 1; i <= steps; i++) {
-      // entorta um pouco a cada passo; os galhos principais buscam a luz, os ramos finos pendem
+      // entorta um pouco a cada passo; as pernadas se abrem e depois buscam a luz, os ramos finos pendem
       d.x += (rand() - 0.5) * wobble;
       d.z += (rand() - 0.5) * wobble;
-      d.y += (rand() - 0.5) * wobble + [0.02, 0.13, 0.05, -0.02][level];
+      d.y += (rand() - 0.5) * wobble + lift;
       d.normalize();
       pts.push(pts[i - 1].clone().addScaledVector(d, len / steps));
       dirs.push(d.clone());
     }
     // o tronco alarga na base, como raiz; os demais galhos afinam até a ponta
-    const radius = (t) => (level === 0 ? r0 * (1 - 0.28 * t) * (1 + 0.5 * Math.exp(-t * 11)) : Math.max(0.006, r0 * (1 - 0.62 * t)));
-    const first = P.length / 3, wrap = Math.max(1, Math.round(r0 * 9)), solid = level < 3 || o.twigs;
+    const radius = (t) => (level === 0 ? r0 * (1 - 0.32 * t) * (1 + 0.6 * Math.exp(-t * 13)) : Math.max(0.008, r0 * (1 - 0.6 * t)));
+    const first = P.length / 3, wrap = ring || Math.max(1, Math.round(r0 * 9)), solid = level < 3 || o.twigs;
     n.set(1, 0, 0);
     if (Math.abs(dirs[0].x) > 0.9) n.set(0, 0, 1);
     for (let i = 0; solid && i <= steps; i++) {
@@ -187,34 +237,55 @@ function buildTree(o, bark, foliage, card) {
       for (let j = 0; j <= sides; j++) {
         const ang = j / sides * Math.PI * 2;
         a.copy(n).multiplyScalar(Math.cos(ang)).addScaledVector(b, Math.sin(ang));
-        const rr = r * (level === 0 ? 1 + 0.12 * Math.exp(-t * 9) * Math.sin(ang * 5 + o.seed) : 1);
+        // na base do tronco, cinco raízes salientes; no resto, a casca nunca é um cilindro perfeito
+        const rr = r * (level === 0
+          ? 1 + 0.2 * Math.exp(-t * 14) * Math.max(Math.sin(ang * 5 + o.seed), -0.3) + 0.035 * Math.sin(ang * 3 + t * 11 + o.seed)
+          : 1 + 0.03 * Math.sin(ang * 2 + t * 7 + level));
         P.push(pts[i].x + a.x * rr, pts[i].y + a.y * rr, pts[i].z + a.z * rr);
         N.push(a.x, a.y, a.z);
-        U.push(j / sides * wrap, t * len / 0.9);
+        U.push(j / sides * wrap, peel + t * len / 0.9);
       }
     }
     for (let i = 0; solid && i < steps; i++) for (let j = 0; j < sides; j++) {
       const q = first + i * (sides + 1) + j, s = q + sides + 1;
       I.push(q, q + 1, s, q + 1, s + 1, s);
     }
-    if (level >= 2) for (let i = 1; i <= steps; i++) if (pts[i].y > 2.8) anchors.push([pts[i], dirs[i], level === 3 ? 1 : 0.45]);
+    // a ponta é fechada por um cone baixo: sem ele o tubo fica aberto e se vê através dele o fundo da árvore
+    if (solid) {
+      const end = pts[steps], T = dirs[steps], r = radius(1), apex = P.length / 3, last = first + steps * (sides + 1);
+      P.push(end.x + T.x * r * 0.8, end.y + T.y * r * 0.8, end.z + T.z * r * 0.8);
+      N.push(T.x, T.y, T.z);
+      U.push(wrap / 2, peel + len / 0.9 + r);
+      for (let j = 0; j < sides; j++) I.push(last + j, last + j + 1, apex);
+    }
+    // onde nascem as folhas: ao longo dos ramos, da metade para a ponta, e sempre na ponta de cada um
+    if (level >= 2) for (let i = Math.ceil(steps * 0.4); i <= steps; i++) if (pts[i].y > 2.6) anchors.push([pts[i], dirs[i], i === steps]);
     if (level < 3) limbs.push(pts);
     if (level === 3) return;
-    const kids = level === 0 ? 4 : level === 1 ? 5 : 4, turn0 = rand() * 6.28;
+    const kids = [4, 4, 3][level], turn0 = rand() * 6.28;
     for (let c = 0; c < kids; c++) {
-      const t = level === 0 ? 0.86 + 0.14 * c / (kids - 1) : 0.32 + 0.68 * (c + rand() * 0.7) / kids;
+      // as pernadas saem do tronco em alturas diferentes, e a última, da ponta dele, quase na direção dele e quase da mesma
+      // grossura: o tronco se bifurca nela, sem toco sobrando acima dos galhos
+      const leader = level === 0 && c === kids - 1;
+      const t = leader ? 1 : level === 0 ? 0.62 + 0.33 * (c + rand() * 0.5) / (kids - 1) : 0.3 + 0.62 * (c + rand() * 0.6) / kids;
       const i = Math.min(steps, Math.max(1, Math.round(t * steps))), parent = dirs[i];
-      const spread = level === 0 ? 0.36 + rand() * 0.28 : 0.48 + rand() * 0.4, turn = turn0 + c * 2.4 + (rand() - 0.5) * 0.7;
+      const spread = leader ? 0.2 + rand() * 0.2 : level === 0 ? 0.6 + rand() * 0.35 : 0.55 + rand() * 0.4, turn = turn0 + c * 2.4 + (rand() - 0.5) * 0.7;
       // o galho filho se afasta do pai por um ângulo, cada um virado para um lado
       a.set(0, 1, 0);
       if (Math.abs(parent.y) > 0.9) a.set(1, 0, 0);
       const e1 = new THREE.Vector3().crossVectors(parent, a).normalize(), e2 = new THREE.Vector3().crossVectors(parent, e1);
       const child = parent.clone().multiplyScalar(Math.cos(spread))
         .addScaledVector(e1, Math.cos(turn) * Math.sin(spread)).addScaledVector(e2, Math.sin(turn) * Math.sin(spread));
-      grow(pts[i], child, radius(i / steps) * 0.61 * (0.9 + rand() * 0.2), level + 1);
+      // a continuação do tronco começa exatamente onde ele termina, com a mesma grossura e a casca seguindo sem emenda
+      if (leader) {
+        grow(pts[steps], child, radius(1), 1, 1, len / 0.9, wrap);
+        continue;
+      }
+      grow(pts[i].clone().addScaledVector(child, -radius(i / steps) * 0.4), child, radius(i / steps) * 0.62 * (0.9 + rand() * 0.2),
+        level + 1, level === 0 ? 1 : 0.6 + 0.5 * (1 - i / steps));
     }
-    if (level > 0) grow(pts[steps], dirs[steps].clone(), radius(1) * 0.95, level + 1);   // a ponta continua em um ramo mais fino
-  })(new THREE.Vector3(), new THREE.Vector3((rand() - 0.5) * 0.08, 1, (rand() - 0.5) * 0.08).normalize(), o.trunk, 0);
+    if (level > 0) grow(pts[steps], dirs[steps].clone(), radius(1) * 0.95, level + 1, 0.8);   // a ponta continua em um ramo mais fino
+  })(new THREE.Vector3(), new THREE.Vector3((rand() - 0.5) * 0.08, 1, (rand() - 0.5) * 0.08).normalize(), o.trunk, 0, 1);
 
   const wood = new THREE.BufferGeometry();
   wood.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
@@ -243,17 +314,31 @@ function buildTree(o, bark, foliage, card) {
   const sketch = new Sketch(), foot = new THREE.Vector3(), reach = top + o.leaf, every = Math.max(1, Math.round(o.leaves / 260));
   const corners = [V(-0.475, 0, 0), V(0.475, 0, 0), V(0.475, 1, 0), V(-0.475, 1, 0)], drawn = corners.map(() => new THREE.Vector3());
   for (const pts of limbs) sketch.path(pts, foot, TREE_RISE, (p) => 0.7 * p.y / reach);
+  // as folhas se juntam em tufos nas pontas dos ramos, uns mais cheios que outros: a copa ganha recortes e vãos por onde
+  // passa o céu, em vez de ser uma bola lisa
+  // Toda ponta de ramo tem o seu tufo; há outros ao longo dos ramos. Os de fora da copa ganham mais folhas: as do miolo
+  // quase não se veem e só custariam desenho
+  const clumps = [];
+  for (const [p, d, tip] of anchors) if (tip || rand() < 0.1) {
+    const out = Math.hypot(p.x - centre.x, (p.y - centre.y) * 1.2, p.z - centre.z) / spread;
+    clumps.push({ p, d, r: 0.4 + rand() * 0.45, weight: (0.5 + rand() * 0.6) * (0.35 + Math.min(1, out)), tone: 0.9 + rand() * 0.2 });
+  }
+  const total = clumps.reduce((sum, c) => sum + c.weight, 0);
   for (let k = 0; k < o.leaves; k++) {
-    let pick;
-    do { pick = anchors[(rand() * anchors.length) | 0]; } while (rand() > pick[2]);
-    pos.set(rand() - 0.5, rand() - 0.5, rand() - 0.5).multiplyScalar(0.55).add(pick[0]);
+    let pick = clumps[0];
+    for (let w = rand() * total, i = 0; i < clumps.length; i++) if ((w -= clumps[i].weight) <= 0) { pick = clumps[i]; break; }
+    // mais folhas na casca do tufo do que no miolo, e o tufo é mais largo do que alto
+    a.set(rand() - 0.5, rand() - 0.5, rand() - 0.5).normalize();
+    const lift = a.y;
+    pos.copy(a).multiplyScalar(pick.r * (0.45 + 0.55 * Math.cbrt(rand()))).multiply(scale.set(1, 0.72, 1)).add(pick.p);
     a.subVectors(pos, centre).normalize();
-    b.set(rand() - 0.5, rand() - 0.5, rand() - 0.5).multiplyScalar(1.6).addScaledVector(pick[1], 0.5).addScaledVector(a, 0.7);
+    b.set(rand() - 0.5, rand() - 0.5, rand() - 0.5).multiplyScalar(1.6).addScaledVector(pick.d, 0.5).addScaledVector(a, 0.7);
     b.y -= 0.2;
     q.setFromUnitVectors(UP, b.normalize()).multiply(roll.setFromAxisAngle(UP, rand() * 6.28));
-    // as folhas de dentro e de baixo da copa recebem menos luz do que as de fora: é isso que dá volume à copa
+    // as folhas de dentro e de baixo da copa recebem menos luz do que as de fora: é isso que dá volume à copa; e cada tufo
+    // tem o seu lado de cima mais claro e o de baixo à sombra, o que desenha os lóbulos da copa
     const inside = Math.hypot(pos.x - centre.x, (pos.y - centre.y) * 1.2, pos.z - centre.z) / spread;
-    const shade = (0.55 + 0.45 * smooth(0.3, 0.95, inside)) * (0.8 + 0.2 * smooth(low, top, pos.y));
+    const shade = (0.55 + 0.45 * smooth(0.3, 0.95, inside)) * (0.8 + 0.2 * smooth(low, top, pos.y)) * (0.8 + 0.2 * (lift + 0.5)) * pick.tone;
     const s = o.leaf * (0.75 + rand() * 0.5), v = (0.78 + rand() * 0.34) * deep * shade;
     m4.compose(pos, q, scale.set(s, s, s));
     tint.setRGB(v * warm * (0.92 + rand() * 0.2), v, v * (0.85 + rand() * 0.2));
@@ -275,25 +360,78 @@ function buildTree(o, bark, foliage, card) {
   return tree;
 }
 
-// Materiais e cartões de folha das árvores, os mesmos em todos os cenários
-let treeKit = null;
-function treeMaterials() {
-  if (treeKit) return treeKit;
-  const barkMaps = barkTextures();
-  const bark = materialize(std({ map: barkMaps.map, bumpMap: barkMaps.bump, bumpScale: 2.5, roughness: 0.95 }), { height: TREE_RISE });
-  // um pouco de luz atravessa as folhas, por isso elas nunca ficam totalmente escuras
-  const foliage = phys({ map: clumpTexture(), alphaTest: 0.5, alphaToCoverage: true, roughness: 0.9, specularIntensity: 0.15, emissive: 0x3f5427, emissiveIntensity: 0.32 });
-  foliage.onBeforeCompile = (shader) => {
+// Vento: um balanço lento da árvore inteira, que cresce com a altura, e um tremor rápido de cada raminho de folhas, os dois
+// em rajadas que vêm e vão. Bem pouco: na ponta da copa, poucos centímetros. A direção é a mesma para todas as árvores
+const breeze = { uWind: { value: 0 }, uBacklight: { value: new THREE.Color() }, uSunDir: { value: SUN.clone() } };
+const WIND = `
+  uniform float uWind;
+  vec3 windAt(vec3 p, vec3 seed, float leaf) {
+    vec3 dir = normalize((vec4(1.0, 0.0, 0.45, 0.0) * modelMatrix).xyz);   // a direção da cena, no espaço da árvore
+    float phase = modelMatrix[3].x * 0.37 + modelMatrix[0].x * 3.0;
+    float gust = 0.55 + 0.45 * sin(uWind * 0.23 + phase * 0.5) * sin(uWind * 0.37 + 1.3);
+    float sway = (0.7 * sin(uWind * 0.83 + phase) + 0.3 * sin(uWind * 1.91 + phase * 1.7) + 0.4) * gust;
+    float h = max(p.y - 0.8, 0.0);
+    vec3 off = dir * sway * h * h * 0.0007;
+    float f = dot(seed, vec3(1.7, 2.3, 1.1));
+    off += leaf * vec3(sin(uWind * 4.1 + f), 0.6 * sin(uWind * 5.3 + f * 1.3), sin(uWind * 3.7 + f * 0.7)) * 0.012 * gust * min(h * 0.25, 1.0);
+    return off;
+  }`;
+// Avança o vento; a praça passa a ser redesenhada a cada quadro (no celular as árvores ficam paradas)
+function blow(dt) {
+  if (LITE) return;
+  breeze.uWind.value += Math.min(dt, 0.1);
+  invalidate(1);
+}
+
+// Materiais e cartões de folha das árvores. A praça tem vento; a estrada, onde as árvores passam correndo, não precisa dele
+const treeKits = new Map();
+function treeMaterials(windy = true) {
+  if (treeKits.has(windy)) return treeKits.get(windy);
+  const other = treeKits.values().next().value, key = windy ? '' : 'Still', bend = (code) => (windy ? code : '');
+  const barkMaps = other?.barkMaps ?? barkTextures();
+  const bark = std({ map: barkMaps.map, bumpMap: barkMaps.bump, bumpScale: 2.5, roughness: 0.95 });
+  bark.onBeforeCompile = (shader) => {
+    shader.uniforms.uWind = breeze.uWind;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 aSphere;')
-      .replace('#include <defaultnormal_vertex>', `#include <defaultnormal_vertex>
-        transformedNormal = normalMatrix * normalize(mix(normalize(mat3(instanceMatrix) * objectNormal), normalize(aSphere), 0.8));`);
+      .replace('#include <common>', `#include <common>\n${WIND}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${bend('transformed += windAt(transformed, vec3(0.0), 0.0);')}`);
   };
-  foliage.customProgramCacheKey = () => 'foliage';
+  bark.customProgramCacheKey = () => 'bark' + key;
+  materialize(bark, { height: TREE_RISE });
+  // folhas vistas dos dois lados, com um pouco de brilho de cera; um pouco de luz atravessa as folhas, por isso elas nunca
+  // ficam totalmente escuras, e contra o sol a copa acende por dentro
+  const leafMap = other?.leafMap ?? clumpTexture();
+  const foliage = std({ map: leafMap, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.74, emissive: 0x3f5427, emissiveIntensity: 0.2 });
+  foliage.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, breeze);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\nattribute vec3 aSphere;\nvarying vec3 vLeafWorld;\n${WIND}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        ${bend(`// o vento empurra a folha no espaço da árvore; volta para o espaço da folha, que é girado e escalado pela instância
+        vec3 leafAt = (instanceMatrix * vec4(transformed, 1.0)).xyz;
+        transformed += transpose(mat3(instanceMatrix)) * windAt(leafAt, instanceMatrix[3].xyz, 1.0) / dot(instanceMatrix[0].xyz, instanceMatrix[0].xyz);`)}
+        vLeafWorld = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;`)
+      .replace('#include <defaultnormal_vertex>', `#include <defaultnormal_vertex>
+        transformedNormal = normalMatrix * normalize(mix(normalize(mat3(instanceMatrix) * objectNormal), normalize(aSphere), 0.75));`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uBacklight, uSunDir;\nvarying vec3 vLeafWorld;')
+      // a normal é quase toda a da copa, que vale para os dois lados da folha: o verso não a inverte
+      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nnormal *= faceDirection;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        // translucidez: a luz que passa pela folha, forte quando se olha contra o sol e fraca no resto
+        float against = pow(max(dot(normalize(vLeafWorld - cameraPosition), uSunDir), 0.0), 5.0);
+        totalEmissiveRadiance += diffuseColor.rgb * uBacklight * (0.18 + 1.6 * against);`);
+  };
+  foliage.customProgramCacheKey = () => 'foliage' + key;
   materialize(foliage, { height: TREE_RISE });
   // mancha no chão que faz o papel da sombra das árvores que ficam fora do mapa de sombras
-  const blob = materialize(new THREE.MeshBasicMaterial({ map: blobTexture(), color: 0x0c1408, transparent: true, opacity: 0.5, depthWrite: false }), { height: 1 });
-  return treeKit = { bark, foliage, blob, fineCard: cards(0.95, 1, true), coarseCard: cards(0.95, 1, false) };
+  const blob = other?.blob ?? materialize(new THREE.MeshBasicMaterial({ map: blobTexture(), color: 0x0c1408, transparent: true, opacity: 0.5, depthWrite: false }), { height: 1 });
+  const kit = {
+    bark, foliage, blob, barkMaps, leafMap,
+    fineCard: other?.fineCard ?? sprigCard(leafMap.image, 0.95, 1, true), coarseCard: other?.coarseCard ?? sprigCard(leafMap.image, 0.95, 1, false),
+  };
+  treeKits.set(windy, kit);
+  return kit;
 }
 
 // Reflexos e luz ambiente de um cenário: uma foto em 360° tirada de onde o carro fica, já com o cenário inteiro, sem o carro,
@@ -319,11 +457,14 @@ function snapshot(sky, group, hide) {
 function daylight(scenery, { sun, fog, reach, hide = [], extra }) {
   const envs = [];
   return (night) => {
-    const sky = night ? nightSky() : sharedSky(), light = night ? MOONLIGHT : SUNLIGHT, kit = treeMaterials();
+    const sky = night ? nightSky() : sharedSky(), light = night ? MOONLIGHT : SUNLIGHT;
     sun.color.setHex(light.color);
     sun.intensity = light.intensity;
-    kit.foliage.emissiveIntensity = night ? 0.02 : 0.32;
-    kit.blob.opacity = night ? 0.3 : 0.5;
+    for (const kit of treeKits.values()) {
+      kit.foliage.emissiveIntensity = night ? 0.02 : 0.2;
+      kit.blob.opacity = night ? 0.3 : 0.5;
+    }
+    breeze.uBacklight.value.setHex(light.color).multiplyScalar(night ? 0.04 : 0.55);
     setReach(reach);
     dressPlan(night);
     showHeavens(night);
@@ -454,8 +595,8 @@ function* buildPraca(praca) {
   const plant = (x, z, close, seed) => {
     const sketchOnly = Math.hypot(x, z) > REACH.full;
     const tree = buildTree(close
-      ? { seed, height: 8.2, trunk: 0.2, sides: 12, twigs: true, leaves: LITE ? 1500 : 3200, leaf: LITE ? 0.68 : 0.56 }
-      : { seed, height: 7 + hash2(seed, 1) * 2.5, trunk: 0.19, sides: 8, leaves: LITE ? 300 : 520, leaf: 1.1, sketchOnly }, bark, foliage, close ? fineCard : coarseCard);
+      ? { seed, height: 8.2, trunk: 0.22, sides: 12, twigs: true, leaves: LITE ? 1000 : 1800, leaf: LITE ? 0.82 : 0.7 }
+      : { seed, height: 7 + hash2(seed, 1) * 2.5, trunk: 0.2, sides: 8, leaves: LITE ? 240 : 380, leaf: 1.2, sketchOnly }, bark, foliage, close ? fineCard : coarseCard);
     tree.position.set(x, 0, z);
     tree.rotation.y = hash2(seed, 2) * 6.28;
     group.add(tree);
@@ -475,8 +616,8 @@ function* buildPraca(praca) {
   yield;
   plant(10.5, -7, true, 14);
   yield;
-  const spots = [[-6.3, -9.5], [-6.3, 11.5], [-6.3, 22], [-6.3, -20.5], [-6.3, 33], [-6.3, -32], [8.4, 12.5], [8.4, 22], [8.4, -20.5], [8.4, 32], [8.4, -31.5],
-    [-15, -4.5], [-18, 9], [-13, 19], [-24, -14], [-27, 4], [17, 3.5], [20, -12], [16.5, 16], [27, -3], [25, 22], [-21, 28], [22, -27]];
+  const spots = [[-6.3, -9.5], [-6.3, 11.5], [-6.3, -20.5], [-6.3, 33], [-6.3, -32], [8.4, 12.5], [8.4, 22], [8.4, -31.5],
+    [-15, -4.5], [-18, 9], [-24, -14], [-27, 4], [17, 3.5], [20, -12], [27, -3], [25, 22], [-21, 28]];
   for (const [i, [x, z]] of spots.entries()) {
     plant(x, z, false, 20 + i);
     yield;
@@ -515,4 +656,4 @@ function* buildPraca(praca) {
   measures.lamp = '3,75 m de altura · globo de Ø 38 cm';
 }
 
-export { praca, ensurePraca, outdoors, cards, buildTree, treeMaterials, daylight, TREE_RISE };
+export { praca, ensurePraca, outdoors, cards, buildTree, treeMaterials, daylight, blow, TREE_RISE };

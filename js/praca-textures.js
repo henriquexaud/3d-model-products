@@ -176,51 +176,83 @@ function tuftTexture() {
 }
 // Ramalhete de folhas de 7 a 12 cm, em fundo transparente; cada cartão da copa mostra um destes
 function clumpTexture() {
+  // Raminho visto de perto: muitas folhas pequenas em volta de hastes finas, cada uma com o seu tom (as novas mais claras e
+  // amareladas, as velhas mais escuras, algumas viradas mostrando o verso acinzentado), a metade de um lado da nervura mais
+  // clara que a outra, e a sombra que as de cima jogam nas de baixo. As do fundo são desenhadas primeiro e mais escuras
   const size = 512, rand = seeded(11);
   return textureOf(paint(size, size, (g) => {
     g.lineCap = 'round';
-    const leaf = (x, y, angle, len) => {
-      const w = len * 0.3, v = 0.82 + rand() * 0.36, yellow = rand() > 0.9 ? 34 : 0;
+    const leaves = [];
+    const leafAt = (x, y, angle, len, depth) => leaves.push({ x, y, angle, len, depth });
+    const stem = (x0, y0, angle, len, width, depth, level) => {
+      const pts = [[x0, y0]];
+      let a = angle, x = x0, y = y0;
+      for (let i = 0; i < 6; i++) {
+        a += (rand() - 0.5) * 0.25;
+        x += Math.cos(a) * len / 6;
+        y += Math.sin(a) * len / 6;
+        pts.push([x, y]);
+      }
+      g.strokeStyle = `rgba(${62 - depth * 20}, ${50 - depth * 16}, ${32 - depth * 10}, 1)`;
+      g.lineWidth = width;
+      g.beginPath();
+      g.moveTo(...pts[0]);
+      for (const q of pts.slice(1)) g.lineTo(...q);
+      g.stroke();
+      // folhas alternadas ao longo da haste, menores perto da ponta
+      const count = level ? 7 : 4;
+      for (let i = 0; i < count; i++) {
+        const t = 0.25 + 0.75 * (i + rand() * 0.5) / count, [px, py] = pts[Math.min(6, Math.round(t * 6))], side = i % 2 ? 1 : -1;
+        leafAt(px, py, a + side * (0.5 + rand() * 0.6), (38 + rand() * 22) * (1.1 - 0.35 * t), depth + rand() * 0.3);
+      }
+      leafAt(x, y, a + (rand() - 0.5) * 0.3, 40 + rand() * 14, depth);
+      if (level) for (let i = 0; i < 5; i++) {
+        const t = 0.15 + 0.7 * i / 5, [px, py] = pts[Math.round(t * 6)], side = i % 2 ? 1 : -1;
+        stem(px, py, a + side * (0.6 + rand() * 0.5), len * (0.45 + rand() * 0.25), width * 0.6, depth + (i % 3 === 0 ? 0.6 : 0), 0);
+      }
+    };
+    const up = -Math.PI / 2;
+    stem(256, 505, up + 0.08, 330, 5, 0.4, 1);
+    stem(250, 430, up - 0.75, 210, 3.5, 1, 1);
+    stem(262, 410, up + 0.8, 210, 3.5, 1, 1);
+    // de trás para a frente
+    leaves.sort((p, q) => q.depth - p.depth);
+    for (const { x, y, angle, len, depth } of leaves) {
+      const w = len * 0.42, dark = 1 - Math.min(0.35, depth * 0.22), r = rand();
+      let h = 80 + rand() * 22, sat = 44 + rand() * 18, light = 31 + rand() * 12;
+      if (r > 0.9) { h = 64 + rand() * 10; light += 9; sat += 6; }          // folha nova, amarelada
+      else if (r > 0.8) { h = 100; sat = 14; light = 44; }                   // o verso, acinzentado
+      light *= dark;
       g.save();
       g.translate(x, y);
       g.rotate(angle);
-      const grad = g.createLinearGradient(0, 0, len, 0);
-      grad.addColorStop(0, `rgb(${50 * v + yellow}, ${92 * v + yellow * 0.6}, ${34 * v})`);
-      grad.addColorStop(1, `rgb(${96 * v + yellow}, ${140 * v + yellow * 0.6}, ${56 * v})`);
-      g.fillStyle = grad;
+      // sombra na folha de baixo
+      g.fillStyle = 'rgba(8, 16, 4, 0.3)';
       g.beginPath();
-      g.moveTo(0, 0);
-      g.bezierCurveTo(len * 0.25, -w * 1.35, len * 0.72, -w, len, 0);
-      g.bezierCurveTo(len * 0.72, w, len * 0.25, w * 1.35, 0, 0);
+      g.ellipse(len * 0.5 + 4, 6, len * 0.5, w * 0.6, 0, 0, 7);
       g.fill();
-      g.strokeStyle = 'rgba(190, 212, 140, 0.45)';   // nervura central
-      g.lineWidth = 1.3;
+      const shape = () => {
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.bezierCurveTo(len * 0.2, -w * 1.1, len * 0.75, -w * 0.9, len, 0);
+        g.bezierCurveTo(len * 0.75, w * 0.9, len * 0.2, w * 1.1, 0, 0);
+      };
+      const grad = g.createLinearGradient(0, -w, 0, w);   // um lado da nervura pega mais luz que o outro
+      grad.addColorStop(0, `hsl(${h}, ${sat}%, ${light + 7}%)`);
+      grad.addColorStop(0.5, `hsl(${h}, ${sat}%, ${light + 3}%)`);
+      grad.addColorStop(0.52, `hsl(${h}, ${sat + 4}%, ${light - 3}%)`);
+      grad.addColorStop(1, `hsl(${h}, ${sat}%, ${light - 6}%)`);
+      g.fillStyle = grad;
+      shape();
+      g.fill();
+      g.strokeStyle = `hsla(${h - 10}, 30%, ${light + 22}%, 0.5)`;   // nervura central
+      g.lineWidth = 1;
       g.beginPath();
-      g.moveTo(3, 0);
-      g.lineTo(len * 0.92, 0);
+      g.moveTo(2, 0);
+      g.lineTo(len * 0.9, 0);
       g.stroke();
       g.restore();
-    };
-    const twig = (x0, y0, angle, len, count) => {
-      const x1 = x0 + Math.cos(angle) * len, y1 = y0 + Math.sin(angle) * len;
-      g.strokeStyle = '#4d3c24';
-      g.lineWidth = 4;
-      g.beginPath();
-      g.moveTo(x0, y0);
-      g.lineTo(x1, y1);
-      g.stroke();
-      for (let i = 0; i < count; i++) {
-        const t = (i + 0.5) / count, side = i % 2 ? 1 : -1;
-        leaf(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, angle + side * (0.55 + rand() * 0.55), 66 + rand() * 50);
-      }
-      leaf(x1, y1, angle + (rand() - 0.5) * 0.4, 76 + rand() * 30);
-    };
-    const up = -Math.PI / 2;
-    twig(250, 390, up - 0.62, 215, 9);
-    twig(262, 350, up + 0.66, 225, 9);
-    twig(254, 240, up - 0.36, 150, 6);
-    twig(258, 210, up + 0.34, 150, 6);
-    twig(256, 508, up, 310, 13);
+    }
   }), true, THREE.ClampToEdgeWrapping);
 }
 // Casca: fissuras verticais escuras e cristas claras. A mesma lista de traços gera a cor e o relevo

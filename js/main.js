@@ -7,7 +7,7 @@ import { carRoot, prepareModel } from './layers.js';
 import { buildMechanics, finishMechanics } from './mechanics.js';
 import { buildSuspension } from './suspension.js';
 import { buildExtras } from './extras.js';
-import { praca } from './praca.js';
+import { praca, blow } from './praca.js';
 import { road, ensureRoad } from './road.js';
 import { studio } from './studio.js';
 import { nightSky } from './night.js';
@@ -83,8 +83,9 @@ loader.load(
   },
   (e) => {
     if (!e.total) return;
-    statusEl.firstElementChild.textContent = Math.round(e.loaded / e.total * 100);
-    statusEl.style.setProperty('--p', e.loaded / e.total);
+    const done = Math.min(1, e.loaded / e.total);   // servido comprimido, o arquivo chega maior do que o tamanho anunciado
+    statusEl.firstElementChild.textContent = Math.round(done * 100);
+    statusEl.style.setProperty('--p', done);
   },
   (err) => {
     console.error(err);
@@ -110,6 +111,7 @@ function frame() {
   tickPlan(dt);
   if (waving) outdoor()?.onWave?.();   // inclusive no quadro em que a onda termina, para tudo ficar no ponto final
   if (renderer.shadowMap.needsUpdate) invalidate(1);
+  if (state.env.scenery === 'praca' && praca.built) blow(dt);   // o vento nas árvores da praça
   if (!gauge.ready && statusEl.classList.contains('done') && !wave.active && plan.uWave.value.x > 1e4) settle(true);
   const drew = consume();
   measure(drew);
