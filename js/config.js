@@ -32,8 +32,10 @@ const ENVS = [
       floor: 0x0a0b0d, line: 0x7f9fd0, grid: 0.09, pool: 2.2, horizon: 0x111318, wall: 0x090a0c, zenith: 0x020203, room: 0x24262a, ground: 0x0a0b0d, fill: 1, key: 2.2 } },
 ];
 
-// Celulares e tablets recebem uma cena mais leve: vidro simples, menos folhas e grama, sombras menores
-const LITE = window.matchMedia('(pointer: coarse)').matches;
+// Celulares e tablets recebem uma cena mais leve: vidro simples, menos folhas e grama, sombras menores.
+// `?lite` e `?full` no endereço forçam uma versão ou a outra, para conferir as duas no mesmo aparelho
+const ASKED = new URLSearchParams(location.search);
+const LITE = ASKED.has('lite') || (!ASKED.has('full') && window.matchMedia('(pointer: coarse)').matches);
 // Tempo de exposição de cada quadro, em segundos, como o de uma câmera: é ele que dá o rastro do asfalto e o borrão das rodas
 const SHUTTER = 1 / 60;
 
@@ -116,6 +118,6 @@ const statusEl = $('status');
 const hintEl = $('hint'), hintText = hintEl.firstElementChild;
 
 export {
-  ASSETS, DRACO, COLORS, ENVS, LITE, SHUTTER, X0, AX_F, AX_R, WHEEL_Y, measures, mm, meters, LAYERS, layers,
+  ASSETS, DRACO, COLORS, ENVS, ASKED, LITE, SHUTTER, X0, AX_F, AX_R, WHEEL_Y, measures, mm, meters, LAYERS, layers,
   state, look, $, statusEl, hintEl, hintText,
 };

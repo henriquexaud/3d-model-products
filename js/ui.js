@@ -10,6 +10,7 @@ import { showHeavens } from './night.js';
 import { CAR } from './physics.js';
 import { RIDE, SPRUNG, CORNERS } from './ride.js';
 import { setDriving } from './drive.js';
+import { hold, unfold } from './blueprint.js';
 
 // ---------- Interface ----------
 const press = (el, on) => el.setAttribute('aria-pressed', String(on));
@@ -72,7 +73,7 @@ function applyEnv() {
   // um cenário novo é montado com os outros escondidos, para não aparecerem nos reflexos dele
   if (praca) praca.group.visible = false;
   if (road) road.group.visible = false;
-  const set = e.scenery === 'praca' ? ensurePraca() : e.scenery === 'road' ? ensureRoad() : null;
+  const set = e.scenery === 'praca' ? ensurePraca(true) : e.scenery === 'road' ? ensureRoad(true) : null;
   studio.visible = !set;
   if (set) {
     set.group.visible = true;
@@ -81,6 +82,7 @@ function applyEnv() {
     showHeavens(false);
     applyStudio(tune);
   }
+  enter(set);
   tintGhost(tune.ghost);
   if (state.view === 'exterior') controls.maxDistance = Math.max(set ? 16 : 9, state.fit * 1.3);
   setDriving(e.scenery === 'road');
@@ -90,6 +92,22 @@ function applyEnv() {
   markEnv(ENVS.indexOf(e));
   press($('btnNight'), state.night);
 }
+// Um cenário ao ar livre aparece na hora como prancheta, com o piso e o céu, e se desdobra a partir do carro assim que está
+// montado (ver blueprint.js). Trocar o dia pela noite não repete a entrada. A primeira de todas espera o véu da carga sair
+let curtain = null, shown = null;
+const lifted = new Promise((resolve) => { curtain = resolve; });
+function enter(set) {
+  if (set === shown) return;
+  shown = set;
+  if (!set) return;
+  hold();
+  Promise.all([set.ready, lifted]).then(() => {
+    if (shown !== set) return;
+    set.dress(state.night);   // agora com os reflexos do cenário pronto
+    unfold(set === road ? 2.8 : 2.4, set !== road);   // na estrada, o que se desdobra fica longe da sombra do carro
+  });
+}
+
 const markEnv = segmented($('scenes'), ENVS.map((e) => e.name), (i) => {
   state.env = ENVS[i];
   applyEnv();
@@ -343,4 +361,4 @@ resize();
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.8;
 
-export { applyBodyMode, updateSpots, say };
+export { applyBodyMode, updateSpots, say, curtain };

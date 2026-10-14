@@ -11,6 +11,7 @@ import { wheels, tyres, spinBlur } from './details.js';
 import { showCluster } from './cluster.js';
 import { poseSuspension, steerMount } from './suspension.js';
 import { poseExtras, turnWheel } from './extras.js';
+import { invalidate } from './pace.js';
 
 // ---------- Condução ----------
 // Liga a física ao que se vê na estrada: o cenário corre, as rodas giram, esterçam e sobem e descem com o relevo da pista,
@@ -87,8 +88,10 @@ function updateDrive(dt) {
     helm.parked = true;
     poseRunningGear(STILL, 0, 0, 0);
     shadowsDirty();
+    invalidate();
     return;
   }
+  invalidate(1);   // na estrada tudo se move o tempo todo
   sim.step(dt);
 
   // Direção: o motorista mira um ponto da faixa pedida alguns metros à frente e esterça o que leva o carro até lá,

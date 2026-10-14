@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { LITE, state, hintEl } from './config.js';
+import { invalidate } from './pace.js';
 
 // ---------- Cena ----------
 // Fora do celular a cena é desenhada primeiro fora da tela (ver post.js), e é lá que as bordas são suavizadas
@@ -29,12 +30,27 @@ if (!LITE) {
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false;
-const shadowsDirty = () => { renderer.shadowMap.needsUpdate = true; };
+const shadowsDirty = () => { renderer.shadowMap.needsUpdate = true; invalidate(); };
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x000000, 6, 18);
 const pmrem = new THREE.PMREMGenerator(renderer);
+// Grupos dos cenários que se revezam na cena: o estúdio, a praça e a estrada
+const sceneries = new Set();
+// Os programas de desenho dependem de quantas luzes há na cena. A praça tem as dos postes (no celular, uma a menos); os outros
+// cenários começam com o mesmo número de luzes apagadas, e assim o carro usa os mesmos programas em todos: a troca de ambiente
+// não espera nenhuma compilação. Como cada luz, mesmo apagada, custa um pouco a cada quadro, elas saem assim que os programas
+// sem elas ficam prontos, em segundo plano (ver `strip`, em post.js)
+const POST_LIGHTS = LITE ? 2 : 3;
+function unlit(group) {
+  group.userData.unlit = Array.from({ length: POST_LIGHTS }, () => {
+    const light = new THREE.PointLight(0x000000, 0, 0, 2);
+    light.position.set(0, -100, 0);
+    group.add(light);
+    return light;
+  });
+}
 
 // Com o acabamento da imagem (post.js), tudo passa pela exposição e pelo mapeamento de tons no fim. Uma cor que deve
 // chegar à tela exatamente como foi escrita (a névoa, o fundo do estúdio) precisa então entrar na cena como a luz que,
@@ -76,6 +92,18 @@ function surroundings(world, from, near, far) {
   const env = pmrem.fromCubemap(target.texture).texture;
   target.dispose();
   return env;
+}
+
+// Luz ambiente e reflexos só do céu, para quando o cenário ainda não está montado. A foto tem o tamanho das fotos dos cenários:
+// o tamanho entra na receita dos programas de desenho, e assim os materiais usam os mesmos programas com uma ou com a outra
+const skyEnvs = new Map();
+function skyEnv(sky) {
+  if (!skyEnvs.has(sky)) {
+    const world = new THREE.Scene();
+    world.background = sky;
+    skyEnvs.set(sky, surroundings(world, CENTRE, 0.1, 100));
+  }
+  return skyEnvs.get(sky);
 }
 
 // Luz ambiente e reflexos do estúdio de um ambiente (ver ENVS em config.js); cada um é montado na primeira vez em que é pedido
@@ -150,4 +178,4 @@ controls.addEventListener('change', () => {
   if (!c.equals(t)) { camera.position.add(c.clone().sub(t)); t.copy(c); }
 });
 
-export { renderer, shadowsDirty, scene, pmrem, onScreen, selfLight, setExposure, surroundings, studioEnv, studioBackground, camera, controls };
+export { renderer, shadowsDirty, scene, sceneries, unlit, pmrem, onScreen, selfLight, setExposure, surroundings, skyEnv, studioEnv, studioBackground, camera, controls };

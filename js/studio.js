@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { LITE } from './config.js';
-import { scene, onScreen, studioEnv, studioBackground } from './scene.js';
+import { scene, sceneries, unlit, onScreen, studioEnv, studioBackground } from './scene.js';
+import { GRID } from './blueprint.js';
 
 // ---------- Estúdio ----------
 // Cenário vazio dos ambientes claro e escuro: piso com malha de papel de projeto, fundo infinito em degradê
 // e um refletor principal, que dá ao carro o brilho e as sombras que ele tem ao ar livre
 const studio = new THREE.Group();
 scene.add(studio);
+sceneries.add(studio);
+unlit(studio);
 
 // Piso: a malha é desenhada no próprio material, com linhas a cada 10 cm e mais fortes a cada metro.
 // Ela some com a distância, e uma área um pouco mais iluminada marca o lugar do carro
@@ -29,16 +32,11 @@ floor.material.onBeforeCompile = (shader) => {
       varying vec2 vGround;
       uniform vec3 uLine;
       uniform float uStrength, uPool;
-      // traço de um pixel de largura, que se apaga quando as linhas ficam juntas demais na tela
-      float gridLine(float cell) {
-        vec2 p = vGround / cell, w = fwidth(p);
-        vec2 d = abs(fract(p - 0.5) - 0.5) / w;
-        return (1.0 - min(min(d.x, d.y), 1.0)) * (1.0 - smoothstep(0.12, 0.45, max(w.x, w.y)));
-      }`)
+      ${GRID}`)
     .replace('#include <color_fragment>', `#include <color_fragment>
       float away = length(vGround);
       diffuseColor.rgb *= mix(1.0, uPool, exp(-away * away / 30.0));
-      float ink = max(gridLine(0.1) * 0.45, gridLine(1.0)) * (1.0 - smoothstep(5.0, 22.0, away));
+      float ink = max(gridLine(vGround, 0.1) * 0.45, gridLine(vGround, 1.0)) * (1.0 - smoothstep(5.0, 22.0, away));
       diffuseColor.rgb = mix(diffuseColor.rgb, uLine, ink * uStrength);`);
 };
 floor.rotation.x = -Math.PI / 2;

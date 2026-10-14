@@ -3,7 +3,8 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { LITE, look } from './config.js';
-import { renderer, scene, camera } from './scene.js';
+import { renderer, scene, sceneries, camera } from './scene.js';
+import { invalidate } from './pace.js';
 
 // ---------- Acabamento da imagem ----------
 // A cena é desenhada fora da tela, com a luz de cada ponto guardada sem limite de brilho, e só no fim vira imagem.
@@ -62,6 +63,9 @@ const finish = LITE ? null : (() => {
   frame.texture.colorSpace = THREE.LinearSRGBColorSpace;
   frame.isXRRenderTarget = true;
   const work = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+  // cópia da cena em andamento, para o que precisa ver através de si (ver `glance`)
+  const glimpse = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
+  glimpse.texture.colorSpace = THREE.LinearSRGBColorSpace;
   const occlusion = new Occlusion(depth);
   const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.16, 0.55, 2);
   bloom.highPassUniforms.smoothWidth.value = 0.5;   // o clarão entra aos poucos, sem recorte
@@ -108,17 +112,103 @@ const finish = LITE ? null : (() => {
       #include <colorspace_fragment>
       gl_FragColor.rgb += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
     }`);
-  return { frame, work, occlusion, bloom, reveal, develop, size: new THREE.Vector2() };
+  return { frame, work, glimpse, occlusion, bloom, reveal, develop, size: new THREE.Vector2() };
 })();
+
+// O vidro e o borrão das rodas mostram o que está atrás deles. O three.js resolveria isso desenhando a cena inteira mais
+// uma vez a cada quadro, só para eles, e com outra versão de cada material; aqui a imagem em andamento é copiada no instante
+// em que eles entram, e já traz tudo o que foi desenhado antes. `behind` é essa cópia, com a luz exposta e comprimida como
+// na imagem; `glance(key)` a refaz, no máximo uma vez por desenho para cada `key`. Sem o acabamento, não há o que copiar
+const seeThrough = !!finish && renderer.capabilities.isWebGL2;
+const behind = { value: finish?.glimpse.texture ?? null };
+const glanced = new Map();
+function glance(key) {
+  if (!seeThrough || renderer.getRenderTarget() !== finish.frame) return;
+  const draw = renderer.info.render.frame;
+  if (glanced.get(key) === draw) return;
+  glanced.set(key, draw);
+  const { frame, glimpse } = finish, gl = renderer.getContext(), state = renderer.state, from = renderer.properties.get(frame);
+  const source = from.__webglMultisampledFramebuffer ?? from.__webglFramebuffer;
+  state.bindFramebuffer(gl.READ_FRAMEBUFFER, source);
+  state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, renderer.properties.get(glimpse).__webglFramebuffer);
+  gl.blitFramebuffer(0, 0, frame.width, frame.height, 0, 0, frame.width, frame.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  state.bindFramebuffer(gl.FRAMEBUFFER, source);
+}
+
+// Compila de antemão os materiais de um cenário sem travar a página: o navegador compila em paralelo e a promessa se cumpre
+// quando tudo está pronto. Os programas dependem das luzes que estão à vista; por isso, durante a chamada (e só nela, sem
+// quadro nenhum no meio), o cenário fica sozinho na cena e visível, com as peças ainda nos bastidores (`staged`), que só
+// entram de verdade depois. Saem os programas da imagem principal, que os espelhos também usam, e os da foto dos reflexos,
+// tirada sem o acabamento e sem o que estiver em `unseen` (o próprio carro)
+const snapTarget = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+function prepare(group, unseen = [], staged = null) {
+  const others = [...sceneries].filter((g) => g !== group && g.parent), homes = others.map((g) => g.parent);
+  const target = renderer.getRenderTarget(), shown = group.visible;
+  others.forEach((g) => g.removeFromParent());
+  if (staged) group.add(staged);
+  group.visible = true;
+  renderer.setRenderTarget(finish?.frame ?? null);
+  const waits = [renderer.compileAsync(scene, camera)];
+  const kept = unseen.map((o) => o.parent);
+  unseen.forEach((o) => o.removeFromParent());
+  renderer.setRenderTarget(snapTarget);
+  waits.push(renderer.compileAsync(scene, camera));
+  unseen.forEach((o, i) => kept[i]?.add(o));
+  renderer.setRenderTarget(target);
+  group.visible = shown;
+  staged?.removeFromParent();
+  others.forEach((g, i) => homes[i].add(g));
+  return Promise.all(waits);
+}
+
+// Tira as luzes apagadas de um cenário (ver `unlit`, em scene.js) depois de compilados os programas para a cena sem elas.
+// Até lá ele continua com elas, e nenhum quadro espera
+function strip(group, unseen = []) {
+  const idle = group.userData.unlit ?? [];
+  if (!idle.length) return Promise.resolve();
+  idle.forEach((light) => light.removeFromParent());
+  const ready = prepare(group, unseen);
+  idle.forEach((light) => group.add(light));
+  return ready.then(() => {
+    idle.forEach((light) => light.removeFromParent());
+    group.userData.unlit = [];
+    invalidate();
+  });
+}
+
+// Compila de antemão os programas do acabamento (oclusão, clarão, revelação), também em paralelo, para o primeiro quadro
+// não parar esperando por eles. A revelação e o clarão desenham fora da tela; só o último passo desenha na tela
+function warmPost() {
+  if (!finish) return Promise.resolve();
+  const { occlusion, bloom, reveal, develop, work } = finish, plane = new THREE.PlaneGeometry(2, 2);
+  const offscreen = new THREE.Scene(), onscreen = new THREE.Scene(), target = renderer.getRenderTarget();
+  for (const material of [occlusion.gtaoMaterial, occlusion.pdMaterial, bloom.materialHighPassFilter, ...bloom.separableBlurMaterials,
+    bloom.compositeMaterial, bloom.blendMaterial, reveal.material]) offscreen.add(new THREE.Mesh(plane, material));
+  onscreen.add(new THREE.Mesh(plane, develop.material));
+  for (const mesh of [...offscreen.children, ...onscreen.children]) mesh.frustumCulled = false;
+  renderer.setRenderTarget(work);
+  const waits = [renderer.compileAsync(offscreen, camera)];
+  renderer.setRenderTarget(null);
+  waits.push(renderer.compileAsync(onscreen, camera));
+  renderer.setRenderTarget(target);
+  return Promise.all(waits);
+}
+
+// O que precisa ser desenhado à parte antes de cada quadro, na vista da câmera (os raios nítidos das rodas, ver details.js)
+const rituals = [];
+const beforeFrame = (fn) => rituals.push(fn);
 
 // Desenha um quadro
 function render() {
   if (!finish) { renderer.render(scene, camera); return; }
-  const { frame, work, occlusion, bloom, reveal, develop, size } = finish, grid = reveal.material.uniforms.uGrid.value;
+  for (const fn of rituals) fn(camera);
+  const { frame, work, glimpse, occlusion, bloom, reveal, develop, size } = finish, grid = reveal.material.uniforms.uGrid.value;
   renderer.getDrawingBufferSize(size);
   if (size.x !== frame.width || size.y !== frame.height) {
     frame.setSize(size.x, size.y);
     work.setSize(size.x, size.y);
+    glimpse.setSize(size.x, size.y);
+    renderer.setRenderTarget(glimpse);   // já reserva a cópia, que é preenchida no meio de um desenho
     grid.set(Math.ceil(size.x / 2), Math.ceil(size.y / 2));   // sombra difusa não pede mais que metade da definição, e custa um quarto
     occlusion.setSize(grid.x, grid.y);
     bloom.setSize(size.x, size.y);
@@ -137,4 +227,4 @@ function render() {
   develop.render(renderer);
 }
 
-export { render };
+export { render, prepare, strip, warmPost, beforeFrame, seeThrough, behind, glance };

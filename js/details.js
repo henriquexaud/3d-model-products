@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { LITE, X0, layers } from './config.js';
-import { renderer, camera } from './scene.js';
-import { std, phys, emblem } from './materials.js';
+import { renderer, scene, camera } from './scene.js';
+import { std, emblem } from './materials.js';
 import { toLayer } from './layers.js';
 import { paint, textureOf } from './praca-textures.js';
+import { seeThrough, behind, glance, beforeFrame } from './post.js';
 
 // ---------- Detalhes acrescentados ao modelo ----------
 // Peças e texturas que o modelo original não traz: pneus com banda de rodagem e inscrições, que cedem onde tocam o chão,
@@ -236,52 +237,86 @@ function loosen(mesh, pivot) {
 // Borrão do giro. Com a roda girando depressa, cada raio varre um arco durante a exposição do quadro e deixa de ser visto
 // como raio: vira um véu, por trás do qual o disco e a pinça continuam nítidos. Aqui os raios são desenhados dezenas de vezes,
 // espalhados por esse arco, e cada cópia soma à imagem a sua parte da diferença entre o raio e o que está atrás dele.
-// O que está atrás vem da foto da cena que o three.js já tira para os vidros (por isso o material pede transmissão).
+// A luz dos raios é calculada uma vez só: antes do quadro, os raios nítidos de todas as rodas são desenhados à parte, com os
+// materiais de verdade (`shootSpokes`), e cada cópia pega ali a cor já iluminada do mesmo ponto do raio, onde ele estava.
+// O que está atrás vem da cópia da imagem tirada quando a primeira cópia entra (ver post.js), já com o disco, a pinça e o chão.
 // Cada cópia só pode contar uma vez em cada ponto da tela, mesmo onde a face torneada cobre o corpo do raio: quem garante
 // é o estêncil, que guarda o número da última cópia desenhada ali. `solids` vêm na ordem de fora para dentro
+const SHARP = 2;   // camada dos raios nítidos
+const sharp = { eye: new THREE.PerspectiveCamera(), target: new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }), size: new THREE.Vector2() };
+sharp.target.texture.colorSpace = THREE.LinearSRGBColorSpace;
+sharp.target.isXRRenderTarget = true;   // a luz sai exposta e comprimida como na imagem, com os mesmos programas de desenho
 function addVeil(w, slot, solids) {
-  const P = [], N = [], C = [];
+  const P = [];
   for (const solid of solids) {
-    const g = solid.geometry, pos = g.attributes.position, normal = g.attributes.normal, tone = solid.material.color;
+    solid.layers.enable(SHARP);
+    const g = solid.geometry, pos = g.attributes.position;
     for (let i = 0; i < g.index.count; i++) {
       const k = g.index.getX(i);
       P.push(pos.getX(k), pos.getY(k), pos.getZ(k));
-      N.push(normal.getX(k), normal.getY(k), normal.getZ(k));
-      C.push(tone.r, tone.g, tone.b);
     }
   }
   const geo = new THREE.BufferGeometry(), share = { value: 1 };
   geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
-  const look = phys({
-    vertexColors: true, metalness: 0.95, roughness: 0.3, clearcoat: 0.7, clearcoatRoughness: 0.06, transmission: 0.001, fog: false,
-    depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  const look = new THREE.ShaderMaterial({
+    uniforms: { uShare: share, tBehind: behind, tSharp: { value: sharp.target.texture }, uPivot: { value: w.pivot.matrixWorld } },
+    vertexShader: `
+      uniform mat4 uPivot;
+      varying vec4 vSharp;
+      void main() {
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vSharp = projectionMatrix * viewMatrix * uPivot * vec4(position, 1.0);   // onde este ponto do raio está na vista nítida
+      }`,
+    fragmentShader: `
+      uniform sampler2D tBehind, tSharp;
+      uniform float uShare;
+      varying vec4 vSharp;
+      void main() {
+        // a vista nítida tem fundo vazio: nas bordas, a cor já vem multiplicada pela cobertura
+        vec4 spoke = texture2D(tSharp, vSharp.xy / vSharp.w * 0.5 + 0.5);
+        vec3 behind = texelFetch(tBehind, ivec2(gl_FragCoord.xy), 0).rgb;
+        gl_FragColor = vec4((spoke.rgb - behind * spoke.a) * uShare, 0.0);
+      }`,
+    toneMapped: false, fog: false, transparent: true, depthWrite: false,
+    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
     stencilWrite: true, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.ReplaceStencilOp,
   });
-  look.onBeforeCompile = (shader) => {
-    shader.uniforms.uShare = share;
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uShare;')
-      .replace('#include <transmission_fragment>', '')
-      .replace('#include <tonemapping_fragment>', `#include <tonemapping_fragment>
-        vec3 behind = texture2D(transmissionSamplerMap, gl_FragCoord.xy / transmissionSamplerSize).rgb;
-        #ifdef TONE_MAPPING
-          behind = toneMapping(behind);   // a foto guarda a luz crua; a imagem, a luz já exposta e comprimida
-        #endif
-        gl_FragColor = vec4((gl_FragColor.rgb - behind) * uShare, 0.0);`);
-  };
   const veil = new THREE.Group();
   veil.visible = false;
   for (let k = 0; k < GHOSTS; k++) {
     const copy = new THREE.Mesh(geo, look);
-    copy.receiveShadow = true;
-    copy.onBeforeRender = () => { look.stencilRef = 1 + slot * GHOSTS + k; };
+    copy.renderOrder = 3;   // depois da sombra sob o carro, antes do vidro
+    copy.onBeforeRender = () => { glance('spin'); look.stencilRef = 1 + slot * GHOSTS + k; };
     veil.add(copy);
   }
   w.pivot.add(veil);
   spinners.push({ solids, veil, share, centre: w.centre });
 }
+// Antes de um quadro com as rodas borradas, os raios nítidos são desenhados sozinhos, na vista da câmera, com metade da
+// definição (o borrão não pede mais) e sobre fundo vazio. A sombra que eles recebem é a do último mapa de sombras
+const lit = new THREE.Color();
+function shootSpokes(eye) {
+  if (!spinners.some((s) => s.veil.visible)) return;
+  renderer.getDrawingBufferSize(sharp.size).multiplyScalar(0.5).floor();
+  if (sharp.size.x !== sharp.target.width || sharp.size.y !== sharp.target.height) sharp.target.setSize(sharp.size.x, sharp.size.y);
+  sharp.eye.copy(eye);
+  sharp.eye.layers.set(SHARP);
+  scene.traverse((o) => { if (o.isLight) o.layers.enable(SHARP); });   // a luz é a mesma da cena
+  const background = scene.background, dirty = renderer.shadowMap.needsUpdate, alpha = renderer.getClearAlpha(), target = renderer.getRenderTarget();
+  renderer.getClearColor(lit);
+  for (const s of spinners) for (const solid of s.solids) solid.visible = true;
+  scene.background = null;
+  renderer.shadowMap.needsUpdate = false;
+  renderer.setClearColor(0x000000, 0);
+  renderer.setRenderTarget(sharp.target);
+  renderer.render(scene, sharp.eye);
+  renderer.setRenderTarget(target);
+  renderer.setClearColor(lit, alpha);
+  renderer.shadowMap.needsUpdate = dirty;
+  scene.background = background;
+  for (const s of spinners) for (const solid of s.solids) solid.visible = false;
+}
+beforeFrame(shootSpokes);
 // `arc` é o ângulo, em radianos, que a roda gira durante a exposição de um quadro
 function spinBlur(arc) {
   arc = Math.min(arc, PERIOD);   // além de um raio até o seguinte a imagem já não muda
@@ -344,7 +379,7 @@ function setupWheels() {
       w.pivot.add(hub);
       lid.removeFromParent();
     }
-    if (LITE) return;
+    if (LITE || !seeThrough) return;
     // porcas, face torneada e corpo da roda, nessa ordem: é a de quem cobre quem para quem olha a roda de fora
     const solids = ['nuts', 'rim', 'wheel'].map((name) => w.pivot.children.find((o) => o.name.startsWith(name))).filter(Boolean)
       .map((mesh) => loosen(mesh, w.pivot)).filter(Boolean);

@@ -126,6 +126,8 @@ function prepareModel(car) {
   for (const o of meshes) {
     const override = MESH_OVERRIDES.find(([re]) => re.test(o.name));
     o.material = override ? override[1] : (MATERIALS[o.material.name] ?? o.material);
+    // o vidro entra por último, depois das marcas no chão, da sombra sob o carro e do borrão das rodas, que se veem através dele
+    if (o.material === MATERIALS.Glass_Gray) o.renderOrder = 4;
     if (o.parent.name.startsWith('wheel_')) {
       const isDisc = o.name.startsWith('brake');
       if (isDisc) discs.push(new THREE.Box3().setFromObject(o));

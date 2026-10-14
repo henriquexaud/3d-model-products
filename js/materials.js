@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { LITE } from './config.js';
 import { renderer, onScreen } from './scene.js';
+import { seeThrough, behind, glance } from './post.js';
 
 // ---------- Texturas e materiais ----------
 // Texturas procedurais (desenhadas em canvas, sem arquivos externos)
@@ -173,15 +174,38 @@ const tailGlass = phys({ color: 0x7a0508, roughness: 0.15, clearcoat: 1.0, emiss
 // Botões vermelhos da cabine: no modelo original usam o material das lanternas, mas não acendem com elas
 const redButton = phys({ color: 0x7a0508, roughness: 0.15, clearcoat: 1.0, emissive: 0x8a0000, emissiveIntensity: 0.35 });
 
+// Vidro liso, levemente tingido, que espelha o entorno. O que aparece através dele vem da cópia da imagem tirada no instante
+// em que ele é desenhado (ver post.js): a luz guardada nela volta a ser a luz da cena, passa pelo tom do vidro e perde
+// a parte que o reflexo leva. É a mesma conta da transmissão do three.js, sem desenhar a cena uma segunda vez
+function clearGlass() {
+  const glass = phys({ color: 0xcfd8dc, metalness: 0, roughness: 0, ior: 1.5, envMapIntensity: 1.0 });
+  if (!seeThrough) return Object.assign(glass, { transmission: 1.0, thickness: 0.01 });
+  glass.transparent = true;            // entra depois do que é opaco e do que, mesmo transparente, fica atrás dele
+  glass.blending = THREE.NoBlending;   // a cor que ele dá já inclui o que está atrás
+  glass.onBeforeRender = () => glance('glass');
+  glass.onBeforeCompile = (shader) => {
+    shader.uniforms.tBehind = behind;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2D tBehind;')
+      .replace('#include <transmission_fragment>', `
+        vec3 seen = texelFetch(tBehind, ivec2(gl_FragCoord.xy), 0).rgb;
+        seen /= max(1.0 - max(seen.r, max(seen.g, seen.b)), 0.02);
+        #ifdef TONE_MAPPING
+          seen /= toneMappingExposure;
+        #endif
+        vec3 kept = 1.0 - EnvironmentBRDF(normal, geometryViewDir, material.specularColor, material.specularF90, material.roughness);
+        totalDiffuse = kept * material.diffuseColor * seen;`);
+  };
+  glass.customProgramCacheKey = () => 'clearGlass';
+  return glass;
+}
+
 // Material por nome do material original do modelo
 const MATERIALS = {
   Body_Color: bodyMaterial,
   Glass_Gray: LITE
     ? phys({ color: 0x9fb4bd, metalness: 0, roughness: 0, transparent: true, opacity: 0.3, envMapIntensity: 1.5 })
-    : phys({
-      color: 0xcfd8dc, metalness: 0, roughness: 0, transmission: 1.0, ior: 1.5, thickness: 0.01,
-      envMapIntensity: 1.0
-    }),
+    : clearGlass(),
   // couro: quase preto, de grão miúdo, com o brilho macio que ele ganha quando a luz bate de raspão
   Leather: triplanar(phys({ color: 0x1b1b1e, roughness: 0.52, bumpMap: leatherBump, bumpScale: 0.9, sheen: 0.4, sheenRoughness: 0.45, sheenColor: 0x66666c }), 7),
   Leather_red: triplanar(phys({ color: 0x6a4a31, roughness: 0.56, bumpMap: leatherBump, bumpScale: 0.9, sheen: 0.3, sheenRoughness: 0.5, sheenColor: 0x8a6a4e }), 7),

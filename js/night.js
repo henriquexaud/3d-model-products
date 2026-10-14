@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { LITE } from './config.js';
-import { renderer, scene, selfLight } from './scene.js';
+import { scene, selfLight } from './scene.js';
 import { SUN, seeded, fbm, smooth, paint, textureOf } from './praca-textures.js';
+import { pixel } from './pace.js';
 
 // ---------- Noite ----------
 // O que os cenários ao ar livre ganham ao anoitecer: céu escuro com nuvens ralas, estrelas e a lua,
@@ -67,7 +68,7 @@ function starField() {
   geometry.setAttribute('aLook', new THREE.BufferAttribute(look, 2));
   const stars = new THREE.Points(geometry, new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: !LITE,
-    uniforms: { uPixel: { value: renderer.getPixelRatio() }, uTint: { value: selfLight(new THREE.Color(0.86, 0.91, 1.0)) } },
+    uniforms: { uPixel: pixel, uTint: { value: selfLight(new THREE.Color(0.86, 0.91, 1.0)) } },
     vertexShader: `
       attribute vec2 aLook;
       uniform float uPixel;

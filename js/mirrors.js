@@ -75,11 +75,26 @@ function buildMirror(spec) {
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
 
+  // O reflexo é desenhado como a imagem principal (ver post.js e scene.js): a luz já sai exposta e comprimida, com os mesmos
+  // programas de desenho da cena, em vez de uma segunda versão de cada material só para os espelhos. Ao ser mostrado,
+  // o reflexo volta a ser luz e segue o caminho de qualquer outra superfície
   const target = new THREE.WebGLRenderTarget(spec.size[0], spec.size[1], {
     samples: 4, type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
   });
   target.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  target.texture.colorSpace = THREE.LinearSRGBColorSpace;
+  target.isXRRenderTarget = true;
   const material = new THREE.MeshBasicMaterial({ map: target.texture, color: 0xdfe5e8, fog: false });   // o vidro tira um pouco da luz
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
+      vec4 reflected = texture2D(map, vMapUv);
+      reflected.rgb /= max(1.0 - max(reflected.r, max(reflected.g, reflected.b)), 0.02);
+      #ifdef TONE_MAPPING
+        reflected.rgb /= toneMappingExposure;
+      #endif
+      diffuseColor *= reflected;`);
+  };
+  material.customProgramCacheKey = () => 'mirrorGlass';
   const mesh = new THREE.Mesh(geo, material);
   mesh.position.copy(centre);
   mesh.updateMatrixWorld(true);

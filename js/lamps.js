@@ -4,6 +4,7 @@ import { scene, selfLight } from './scene.js';
 import { headGlass, ledGlass, tailGlass } from './materials.js';
 import { M } from './layers.js';
 import { smooth, paint, textureOf } from './praca-textures.js';
+import { invalidate } from './pace.js';
 
 // ---------- Faróis e lanternas ----------
 // Um farol aceso é mais do que uma lente clara: ela estoura de brilho, a câmera enxerga um halo em volta dela
@@ -101,6 +102,7 @@ const seen = new THREE.Vector3(), toCamera = new THREE.Vector3();
 function updateLamps(dt, camera) {
   // as luzes acendem e apagam em uma fração de segundo, não de um quadro para o outro
   const want = state.lights ? 1 : 0;
+  if (lamps.level !== want) invalidate(2);
   lamps.level += (want - lamps.level) * (1 - Math.exp(-dt * 11));
   if (Math.abs(want - lamps.level) < 0.003) lamps.level = want;
   const lit = lamps.level, body = layers.body.group, tune = look();
