@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { scene, studioEnv, studioBackground } from './scene.js';
+import { LITE } from './config.js';
+import { scene, onScreen, studioEnv, studioBackground } from './scene.js';
 
 // ---------- Estúdio ----------
 // Cenário vazio dos ambientes claro e escuro: piso com malha de papel de projeto, fundo infinito em degradê
@@ -50,7 +51,8 @@ const backdrop = new THREE.Mesh(
   new THREE.SphereGeometry(1, 48, 24),
   new THREE.ShaderMaterial({
     side: THREE.BackSide, depthTest: false, depthWrite: false, fog: false,
-    toneMapped: false,   // a névoa do piso também não passa pelo mapeamento de tons; assim as duas cores coincidem
+    toneMapped: !LITE,   // no celular, a névoa do piso também não passa pelo mapeamento de tons; assim as duas cores coincidem
+    defines: LITE ? { DITHER: '' } : {},   // fora do celular esse ruído é aplicado no fim, à imagem pronta (post.js)
     uniforms: {
       uHorizon: { value: new THREE.Color() },
       uWall: { value: new THREE.Color() },
@@ -70,9 +72,12 @@ const backdrop = new THREE.Mesh(
         vec3 c = mix(uWall, uZenith, smoothstep(0.08, 0.8, h));
         c = mix(c, uHorizon, exp(-h * h / 0.018));
         gl_FragColor = vec4(c, 1.0);
+        #include <tonemapping_fragment>
         #include <colorspace_fragment>
         // ruído de um nível de cor, para o degradê não formar faixas
-        gl_FragColor.rgb += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+        #ifdef DITHER
+          gl_FragColor.rgb += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+        #endif
       }`,
   })
 );
@@ -98,14 +103,15 @@ function applyStudio(e) {
   grid.uLine.value.setHex(e.line);
   grid.uStrength.value = e.grid;
   grid.uPool.value = e.pool;
-  backdrop.material.uniforms.uHorizon.value.setHex(e.horizon);
-  backdrop.material.uniforms.uWall.value.setHex(e.wall);
-  backdrop.material.uniforms.uZenith.value.setHex(e.zenith);
+  // fundo e névoa têm de chegar à tela com a cor escolhida, qualquer que seja a exposição
+  onScreen(backdrop.material.uniforms.uHorizon.value.setHex(e.horizon));
+  onScreen(backdrop.material.uniforms.uWall.value.setHex(e.wall));
+  onScreen(backdrop.material.uniforms.uZenith.value.setHex(e.zenith));
   key.intensity = e.key;
   floor.material.envMapIntensity = e.fill;
   scene.environment = studioEnv(e);
-  scene.background = studioBackground.setHex(e.horizon);
-  scene.fog.color.setHex(e.horizon);
+  scene.background = onScreen(studioBackground.setHex(e.horizon));
+  onScreen(scene.fog.color.setHex(e.horizon));
 }
 
 export { studio, applyStudio };

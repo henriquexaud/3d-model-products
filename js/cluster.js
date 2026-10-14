@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { LITE } from './config.js';
+import { selfLight } from './scene.js';
 import { toLayer } from './layers.js';
 import { paint, textureOf } from './praca-textures.js';
 
@@ -74,7 +76,8 @@ function buildCluster() {
 
   // ponteiro: gira em torno do eixo, à frente do mostrador
   const pointer = new THREE.Mesh(new THREE.BoxGeometry(0.0021, 0.047, 0.0008).translate(0, 0.0165, 0),
-    new THREE.MeshBasicMaterial({ color: 0xe23a24, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ color: 0xe23a24, toneMapped: !LITE }));
+  selfLight(pointer.material.color);
   mount(pointer, FACE.x, FACE.y + HUB * Math.cos(TILT), FACE.z - HUB * Math.sin(TILT), 0.0042);
   pointer.rotation.order = 'XYZ';
   cluster.needle = (rpm) => { pointer.rotation.z = THREE.MathUtils.degToRad(SWEEP.from - rpm / 1000 * SWEEP.per1000 - 90); };
@@ -82,7 +85,9 @@ function buildCluster() {
   // telas: à esquerda as temperaturas, à direita a velocidade
   const screen = (place, draw) => {
     const canvas = paint(256, 180, draw), map = textureOf(canvas, true, THREE.ClampToEdgeWrapping);
-    mount(new THREE.Mesh(new THREE.PlaneGeometry(0.094, 0.066), new THREE.MeshBasicMaterial({ map, toneMapped: false })), place.x, place.y, place.z, 0.0008);
+    const lit = new THREE.MeshBasicMaterial({ map, toneMapped: !LITE });
+    selfLight(lit.color);
+    mount(new THREE.Mesh(new THREE.PlaneGeometry(0.094, 0.066), lit), place.x, place.y, place.z, 0.0008);
     return { canvas, map };
   };
   const blank = (g) => { g.fillStyle = 'rgb(6,7,9)'; g.fillRect(0, 0, 256, 180); };

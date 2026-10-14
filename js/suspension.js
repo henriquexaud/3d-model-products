@@ -4,11 +4,14 @@ import { mats } from './materials.js';
 import { G, M } from './layers.js';
 import { V, S, rod, unitRod, pose, cyl, rbox, ball, tube, spring, boot, mergeMeshes } from './geometry.js';
 import { BRAKE_BRACKETS } from './mechanics.js';
+import { CAR } from './physics.js';
+import { RIDE } from './ride.js';
 
 // ---------- Suspensão, direção e o que acompanha cada roda ----------
 // Braços triangulares sobrepostos nas quatro rodas. Cada peça é montada onde fica com o carro parado e, a cada quadro,
 // `poseSuspension` a leva para a posição que o curso da roda pede: os braços giram em torno das buchas, a manga sobe e desce,
-// a mola encolhe, a haste do amortecedor entra no tubo, a barra estabilizadora torce e o semieixo inclina.
+// a mola encolhe, a haste do amortecedor entra no tubo, a barra estabilizadora torce e o semieixo inclina. Nas rodas
+// da frente, a manga também esterça em torno do pino mestre, levando junto a pinça e a ponta da barra de direção.
 // Medidas do lado direito, em metros; o lado esquerdo é o espelho
 const AXLES = {
   front: {
@@ -51,6 +54,10 @@ function buildCorner(A, s, discBox) {
   // manga de eixo, com as três orelhas e as rótulas: sobe e desce com a roda
   const balls = [X(A.lower.ball), X(A.upper.ball), X(A.steer.ball)];
   c.steer = balls[2];
+  // pino mestre: a reta que passa pelas rótulas dos dois braços. É em torno dela que a manga da frente esterça
+  c.pin = balls[0].clone();
+  c.axis = balls[1].clone().sub(balls[0]).normalize();
+  c.turn = new THREE.Quaternion();
   c.hub = assembly(mv, ZERO, [
     cyl(0.07, 0.07, 'x', s * A.hub, WHEEL_Y, A.z, m.alu, 20),
     cyl(0.085, 0.012, 'x', s * (A.hub + 0.03), WHEEL_Y, A.z, m.steel, 24),            // flange do cubo
@@ -120,6 +127,11 @@ function buildCorner(A, s, discBox) {
   for (let k = 0; k < (c.front ? 3 : 2); k++) {   // pistões
     const a = Math.PI + (k - (c.front ? 1 : 0.5)) * 0.36;
     parts.push(cyl(0.022, 0.014, 'x', s * (x0 - 0.005), cy + (r - 0.035) * Math.sin(a), cz + (r - 0.035) * Math.cos(a), b.steel, 12));
+    // do lado de fora, o alojamento de cada pistão aparece como um ressalto na face da pinça
+    parts.push(cyl(0.027, 0.012, 'x', s * (x1 + 0.003), cy + (r - 0.04) * Math.sin(a), cz + (r - 0.04) * Math.cos(a), b.caliper, 24));
+  }
+  for (const a of [a0 + 0.07, a1 - 0.07]) {   // parafusos que unem as duas metades
+    parts.push(cyl(0.007, 0.008, 'x', s * (x1 + 0.002), cy + (r + 0.012) * Math.sin(a), cz + (r + 0.012) * Math.cos(a), b.steel, 6));
   }
   c.caliper = assembly(M('brakes'), ZERO, parts);
   c.inlet = V(s * (x0 - 0.008), cy + 0.02, cz - (r - 0.03));
@@ -166,11 +178,22 @@ function buildSuspension(discBoxes) {
 }
 
 // Leva as peças de cada canto para a posição pedida pelo curso da roda (m; positivo quando a suspensão comprime)
-const p = new THREE.Vector3(), q = new THREE.Vector3(), turn = new THREE.Quaternion();
-function poseSuspension(travel) {
+// e pelo esterço `steer` (rad; positivo para a esquerda), que é o ângulo médio das duas rodas da frente
+const RACK = 0.145;   // braço de direção: distância da rótula da barra ao pino mestre (m)
+const p = new THREE.Vector3(), q = new THREE.Vector3(), turn = new THREE.Quaternion(), inner = new THREE.Vector3();
+function poseSuspension(travel, steer = 0) {
+  const lock = Math.tan(steer);
   corners.forEach((c, i) => {
     const t = Math.max(-0.08, Math.min(0.08, travel[i]));
-    c.hub.position.y = c.caliper.position.y = c.sensor.position.y = t;
+    // a roda de dentro da curva esterça mais do que a de fora, para as duas descreverem círculos com o mesmo centro
+    c.turn.setFromAxisAngle(c.axis, c.front ? Math.atan(lock / (1 + c.s * RIDE.track[0] / (2 * CAR.wheelbase) * lock)) : 0);
+    for (const part of [c.hub, c.caliper, c.sensor]) {
+      part.quaternion.copy(c.turn);
+      part.position.copy(c.pin).applyQuaternion(c.turn).negate().add(c.pin);
+      part.position.y += t;
+    }
+    // onde vai parar um ponto preso à manga
+    const knuckle = (from, to) => { to.copy(from).sub(c.pin).applyQuaternion(c.turn).add(c.pin); to.y += t; return to; };
     // ângulo de cada braço para a rótula subir `t`; `carry` leva junto um ponto preso ao braço
     for (const arm of [c.lower, c.upper]) {
       arm.angle = c.s * (Math.asin((arm.rise + t) / arm.reach) - Math.asin(arm.rise / arm.reach));
@@ -190,7 +213,8 @@ function poseSuspension(travel) {
     st.coil.quaternion.copy(turn);
     st.coil.scale.y = (length - st.cap - st.seat) / st.free;
 
-    pose(c.link, c.inner, p.copy(c.steer).setY(c.steer.y + t));
+    // a cremalheira corre para o lado e empurra a barra de direção, que gira a manga
+    pose(c.link, c.front ? inner.copy(c.inner).setX(c.inner.x - RACK * steer) : c.inner, knuckle(c.steer, p));
 
     const bar = c.bar, lever = bar.tip.z - bar.axis.z, base = carry(bar.arm, bar.foot, p);
     const twist = -Math.asin(Math.max(-0.9, Math.min(0.9, (base.y - bar.foot.y) / lever)));
@@ -203,9 +227,20 @@ function poseSuspension(travel) {
       c.shaft.group.rotation.z = c.s * Math.asin(t / c.shaft.reach);
       c.stub.position.y = t;
     }
-    pose(c.hose, c.bracket, p.copy(c.inlet).setY(c.inlet.y + t));
-    pose(c.wire, c.wireFrom, p.copy(c.sensorAt).setY(c.sensorAt.y + t));
+    pose(c.hose, c.bracket, knuckle(c.inlet, p));
+    pose(c.wire, c.wireFrom, knuckle(c.sensorAt, p));
   });
 }
 
-export { buildSuspension, poseSuspension };
+// Leva ao lugar o conjunto de uma roda (`mount`, que em repouso fica em `rest`): esterçado junto com a manga do canto `i`
+// e `rise` metros acima
+const pinAt = new THREE.Vector3();
+function steerMount(i, mount, rest, rise) {
+  const c = corners[i];
+  pinAt.copy(c.pin).setX(c.pin.x + X0);
+  mount.quaternion.copy(c.turn);
+  mount.position.copy(rest).sub(pinAt).applyQuaternion(c.turn).add(pinAt);
+  mount.position.y += rise;
+}
+
+export { buildSuspension, poseSuspension, steerMount };

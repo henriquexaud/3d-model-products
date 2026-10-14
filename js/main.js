@@ -12,9 +12,10 @@ import { road } from './road.js';
 import { addDetails } from './details.js';
 import { buildCluster } from './cluster.js';
 import { buildMirrors, updateMirrors, warmMirrors } from './mirrors.js';
-import { sim, ride, updateDrive, boardCamera, leaveCamera } from './drive.js';
+import { sim, ride, helm, updateDrive, boardCamera, leaveCamera } from './drive.js';
 import { updateLamps } from './lamps.js';
 import { applyBodyMode, updateSpots, say } from './ui.js';
+import { render } from './post.js';
 
 // ---------- Modelo ----------
 const shadowTexture = new THREE.TextureLoader().load(ASSETS + 'ferrari_ao.png');
@@ -40,7 +41,7 @@ loader.load(
     const shadow = new THREE.Mesh(
       new THREE.PlaneGeometry(0.655 * 4, 1.3 * 4),
       new THREE.MeshBasicMaterial({
-        map: shadowTexture, blending: THREE.MultiplyBlending, toneMapped: false, transparent: true
+        map: shadowTexture, blending: THREE.MultiplyBlending, toneMapped: false, transparent: true, fog: false
       })
     );
     shadow.rotation.x = -Math.PI / 2;
@@ -53,7 +54,7 @@ loader.load(
     statusEl.classList.add('done');
     document.body.classList.remove('loading');
     say('Arraste para girar · role para aproximar', 0);
-    if (location.search.includes('debug')) window.viewer = { THREE, scene, camera, controls, renderer, carRoot, layers, state, applyBodyMode, frame, sim, ride, get praca() { return praca; }, get road() { return road; } };
+    if (location.search.includes('debug')) window.viewer = { THREE, scene, camera, controls, renderer, carRoot, layers, state, applyBodyMode, frame, sim, ride, helm, get praca() { return praca; }, get road() { return road; } };
   },
   (e) => {
     if (!e.total) return;
@@ -79,7 +80,7 @@ function frame() {
   } else if (state.env.scenery === 'praca') {
     // ao ar livre a bruma só encobre o horizonte
     scene.fog.near = 30;
-    scene.fog.far = 135;
+    scene.fog.far = 170;
     // uma árvore some enquanto a câmera está dentro da copa ou colada ao tronco; a sombra é sempre refeita com todas
     for (const tree of praca.trees) {
       const p = camera.position, u = tree.userData;
@@ -94,7 +95,7 @@ function frame() {
   }
   const aboard = state.view === 'interior' && boardCamera(camera);
   updateMirrors(camera);
-  renderer.render(scene, camera);
+  render();
   if (aboard) leaveCamera(camera);
   updateSpots();
 }

@@ -1,18 +1,22 @@
 const ASSETS = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/models/gltf/';
 const DRACO = 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/gltf/';
 
+// Cores da carroceria. Além do tom, cada tinta tem o seu acabamento sob o verniz: `metal` é o quanto ela reflete como metal,
+// `rough` o quanto espalha a luz e `flake` o quanto as lamelas cintilam (as tintas lisas quase não têm)
 const COLORS = [
-  { name: 'Vermelho Rubi', hex: 0xb00012 },
-  { name: 'Preto Ônix', hex: 0x0b0b0d },
-  { name: 'Cinza Urbano', hex: 0x4a4f57 },
-  { name: 'Branco Pérola', hex: 0xe9e9e6 },
-  { name: 'Azul Noturno', hex: 0x0d2a5c },
+  { name: 'Vermelho Rubi', hex: 0xa4000f, metal: 0.42, rough: 0.46, flake: 0.6 },
+  { name: 'Preto Ônix', hex: 0x08080a, metal: 0.55, rough: 0.5, flake: 0.6 },
+  { name: 'Cinza Urbano', hex: 0x454a52, metal: 0.85, rough: 0.44, flake: 1 },
+  { name: 'Branco Pérola', hex: 0xe4e4df, metal: 0.12, rough: 0.5, flake: 0.45 },
+  { name: 'Azul Noturno', hex: 0x0b2552, metal: 0.72, rough: 0.44, flake: 1 },
 ];
 // Três ambientes, cada um com a versão de dia e a de noite. `beam` é o quanto o facho dos faróis aparece no chão
-// e `glow` o tamanho do halo em volta das lentes: sob o sol quase não se nota um farol aceso
+// e `glow` o tamanho do halo em volta das lentes: sob o sol quase não se nota um farol aceso.
+// `bloom` (opcional) é a partir de quanto brilho, já com a exposição, uma luz deixa clarão na imagem
 const ENVS = [
   // ao ar livre: a praça, com o carro parado, e a estrada, com ele em movimento
-  { name: 'Praça', scenery: 'praca',
+  // `steer` é como as rodas da frente ficam com o carro parado: na praça, um pouco viradas, como quem acabou de estacionar
+  { name: 'Praça', scenery: 'praca', steer: 0.12,
     day: { exposure: 0.56, ghost: 0x16202b, beam: 0.04, glow: 0.4 },
     night: { exposure: 1.0, ghost: 0xdce6ff, beam: 0.45, glow: 1 } },   // o calçadão é claro e devolve bem mais luz do que o asfalto
   { name: 'Estrada', scenery: 'road',
@@ -22,7 +26,7 @@ const ENVS = [
   // e o degradê do fundo (horizonte, parede, teto); `room` e `ground` são a cor da sala e do chão nos reflexos,
   // `fill` o quanto dessa luz difusa chega ao piso e `key` a força do refletor principal, o único que faz sombra
   { name: 'Estúdio',
-    day: { exposure: 0.9, ghost: 0x1b2330, beam: 0.1, glow: 0.5,
+    day: { exposure: 0.9, ghost: 0x1b2330, beam: 0.1, glow: 0.5, bloom: 3.4,   // o fundo branco não pode brilhar, só os reflexos mais fortes
       floor: 0xd6d8dc, line: 0x4d6382, grid: 0.6, pool: 1.04, horizon: 0xf1f2f4, wall: 0xe3e5e9, zenith: 0xc6c9cf, room: 0x3a3d42, ground: 0x8a8d92, fill: 0.4, key: 3.2 },
     night: { exposure: 0.8, ghost: 0xdce6ff, beam: 6, glow: 1,
       floor: 0x0a0b0d, line: 0x7f9fd0, grid: 0.09, pool: 2.2, horizon: 0x111318, wall: 0x090a0c, zenith: 0x020203, room: 0x24262a, ground: 0x0a0b0d, fill: 1, key: 2.2 } },
@@ -30,6 +34,8 @@ const ENVS = [
 
 // Celulares e tablets recebem uma cena mais leve: vidro simples, menos folhas e grama, sombras menores
 const LITE = window.matchMedia('(pointer: coarse)').matches;
+// Tempo de exposição de cada quadro, em segundos, como o de uma câmera: é ele que dá o rastro do asfalto e o borrão das rodas
+const SHUTTER = 1 / 60;
 
 // Referências do modelo original, em metros (x: lateral, y: altura, z: comprimento; a frente aponta para -z)
 const X0 = -0.006;                        // desvio lateral do modelo em relação ao centro
@@ -110,6 +116,6 @@ const statusEl = $('status');
 const hintEl = $('hint'), hintText = hintEl.firstElementChild;
 
 export {
-  ASSETS, DRACO, COLORS, ENVS, LITE, X0, AX_F, AX_R, WHEEL_Y, measures, mm, meters, LAYERS, layers,
+  ASSETS, DRACO, COLORS, ENVS, LITE, SHUTTER, X0, AX_F, AX_R, WHEEL_Y, measures, mm, meters, LAYERS, layers,
   state, look, $, statusEl, hintEl, hintText,
 };

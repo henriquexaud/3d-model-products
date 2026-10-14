@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { COLORS, ENVS, X0, measures, LAYERS, state, look, $, hintEl, hintText } from './config.js';
-import { renderer, shadowsDirty, scene, camera, controls } from './scene.js';
+import { COLORS, ENVS, LITE, X0, measures, LAYERS, state, look, $, hintEl, hintText } from './config.js';
+import { renderer, shadowsDirty, setExposure, camera, controls } from './scene.js';
 import { studio, applyStudio } from './studio.js';
-import { bodyMaterial, highlight, ghost } from './materials.js';
+import { bodyMaterial, paintFlake, highlight, ghost, tintGhost } from './materials.js';
 import { bodyMeshes } from './layers.js';
 import { praca, ensurePraca } from './praca.js';
 import { road, ensureRoad } from './road.js';
@@ -59,12 +59,16 @@ COLORS.forEach((c, i) => {
 function setColor(i) {
   state.color = COLORS[i];
   bodyMaterial.color.setHex(state.color.hex);
+  bodyMaterial.metalness = state.color.metal;
+  bodyMaterial.roughness = state.color.rough;
+  paintFlake.value = state.color.flake;
   [...$('colors').children].forEach((b, j) => press(b, i === j));
 }
 
 // Ambiente: a praça, a estrada ou o estúdio de projeto, cada um de dia ou de noite
 function applyEnv() {
   const e = state.env, tune = look();
+  setExposure(tune.exposure);   // antes de tudo: as cores fixas do cenário são acertadas para esta exposição
   // um cenário novo é montado com os outros escondidos, para não aparecerem nos reflexos dele
   if (praca) praca.group.visible = false;
   if (road) road.group.visible = false;
@@ -77,8 +81,7 @@ function applyEnv() {
     showHeavens(false);
     applyStudio(tune);
   }
-  renderer.toneMappingExposure = tune.exposure;
-  ghost.uniforms.uColor.value.setHex(tune.ghost);
+  tintGhost(tune.ghost);
   if (state.view === 'exterior') controls.maxDistance = Math.max(set ? 16 : 9, state.fit * 1.3);
   setDriving(e.scenery === 'road');
   shadowsDirty();
@@ -87,7 +90,11 @@ function applyEnv() {
   markEnv(ENVS.indexOf(e));
   press($('btnNight'), state.night);
 }
-const markEnv = segmented($('scenes'), ENVS.map((e) => e.name), (i) => { state.env = ENVS[i]; applyEnv(); });
+const markEnv = segmented($('scenes'), ENVS.map((e) => e.name), (i) => {
+  state.env = ENVS[i];
+  applyEnv();
+  if (ENVS[i].scenery === 'road' && !LITE) say('↑ ↓ velocidade · ← → trocar de faixa', 3600);
+});
 $('btnNight').addEventListener('click', () => {
   state.night = !state.night;
   applyEnv();
@@ -298,7 +305,8 @@ function openSheet() {
     fold('Como o movimento é calculado', [['Massa com motorista', `${CAR.mass.toLocaleString('pt-BR')} kg`], ['Arrasto do ar (Cx × área)', '0,36 × 2,03 m²'],
       ['Pressão aerodinâmica', '140 kg a 200 km/h'], ['Rolagem dos pneus', '1,1% do peso, mais a cada km/h'],
       ['Aderência dos pneus', `${CAR.grip.toLocaleString('pt-BR')} g`], ['Câmbio', `${CAR.gears.length} marchas, diferencial ${CAR.finalDrive.toLocaleString('pt-BR')}`],
-      ['Velocidade máxima', `${Math.round(CAR.topSpeed * 3.6)} km/h`]]);
+      ['Velocidade máxima', `${Math.round(CAR.topSpeed * 3.6)} km/h`], ['Direção', 'Volante 11,9:1 · a roda de dentro da curva esterça mais'],
+      ['Rodas', 'Giram a distância percorrida dividida pelo raio de 358 mm']]);
     fold('Como a suspensão é calculada', [['Massa apoiada nas molas', `${SPRUNG.toLocaleString('pt-BR')} kg`], ['Massa de cada roda diant. / tras.', `${RIDE.unsprung[0]} / ${RIDE.unsprung[2]} kg`],
       ['Molas, medidas na roda', `${Math.round(CORNERS[0].k / 1000)} / ${Math.round(CORNERS[2].k / 1000)} N/mm`],
       ['Amortecimento', `${Math.round(RIDE.damping * 100)}% do crítico nos movimentos lentos`], ['Pneu', `${RIDE.tyre / 1000} N/mm`],

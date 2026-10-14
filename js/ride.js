@@ -18,6 +18,7 @@ const RIDE = {
   tyre: 290000, tyreDamping: 350,      // N/m e N·s/m: o pneu
   stop: 0.06,                          // curso até o batente (m)
   aeroFront: 0.45,                     // parte da pressão do ar que cai sobre o eixo dianteiro
+  rollArm: 0.34,                       // altura do centro de massa acima do eixo em torno do qual a carroceria rola nas curvas (m)
 };
 const SPRUNG = CAR.mass - RIDE.unsprung.reduce((a, b) => a + b);   // massa apoiada nas molas
 const TO_FRONT = CAR.wheelbase * CAR.rearShare, TO_REAR = CAR.wheelbase - TO_FRONT;   // do centro de massa a cada eixo
@@ -75,8 +76,9 @@ function createRide() {
   let vz = 0, vp = 0, vr = 0, fresh = true;
   const vu = [0, 0, 0, 0], ground = r.ground, force = [0, 0, 0, 0];
 
-  // Avança `dt` segundos. `x` é a distância percorrida ao fim do passo; velocidade, aceleração e pressão do ar vêm da física do carro
-  r.step = (dt, x, speed, accel, downforce) => {
+  // Avança `dt` segundos. `x` é a distância percorrida ao fim do passo; velocidade, aceleração e pressão do ar vêm da física do carro.
+  // `lateral` é a aceleração para a esquerda que a curva impõe (m/s²)
+  r.step = (dt, x, speed, accel, downforce, lateral = 0) => {
     if (!(dt > 1e-6)) return;   // dois quadros no mesmo instante: nada a avançar
     const n = Math.ceil(dt / 0.001), h = dt / n;
     for (let k = 1; k <= n; k++) {
@@ -109,6 +111,7 @@ function createRide() {
       fresh = false;
       // acelerar joga o peso para trás e frear, para a frente; o ar aperta os dois eixos, um pouco mais o traseiro
       tip += SPRUNG * accel * CAR.cgHeight * (1 - RIDE.antiPitch) + downforce * (TO_REAR * (1 - RIDE.aeroFront) - TO_FRONT * RIDE.aeroFront);
+      lean -= SPRUNG * lateral * RIDE.rollArm;   // na curva a carroceria deita para o lado de fora
       vz += (lift - downforce) / SPRUNG * h;
       vp += tip / RIDE.pitchInertia * h;
       vr += lean / RIDE.rollInertia * h;

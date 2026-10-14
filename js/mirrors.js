@@ -4,6 +4,7 @@ import { renderer, scene } from './scene.js';
 import { toLayer } from './layers.js';
 import { UP } from './geometry.js';
 import { sim } from './drive.js';
+import { spinners } from './details.js';
 
 // ---------- Espelhos ----------
 // Os vidros dos retrovisores mostram um reflexo de verdade: a cena é desenhada outra vez, vista por trás de cada espelho,
@@ -119,6 +120,10 @@ function reflectAll(list, from) {
   const was = hidden.map((o) => o.visible), cabinWas = cabin.visible;
   const target = renderer.getRenderTarget(), dirty = renderer.shadowMap.needsUpdate;
   for (const o of hidden) o.visible = false;
+  // o borrão das rodas custa uma foto extra da cena a cada desenho: nos reflexos, pequenos, os raios aparecem nítidos
+  const blurred = spinners.filter((s) => s.veil.visible);
+  const sharp = (on) => { for (const s of blurred) { s.veil.visible = !on; for (const solid of s.solids) solid.visible = on; } };
+  sharp(true);
   renderer.shadowMap.needsUpdate = false;   // as sombras são refeitas no desenho principal, com a cena completa
   for (const m of list) {
     cabin.visible = cabinWas && (m.inside || state.body !== 'solid');
@@ -126,6 +131,7 @@ function reflectAll(list, from) {
   }
   cabin.visible = cabinWas;
   hidden.forEach((o, i) => { o.visible = was[i]; });
+  sharp(false);
   renderer.setRenderTarget(target);
   renderer.shadowMap.needsUpdate = dirty;
 }

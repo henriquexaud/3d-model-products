@@ -280,27 +280,73 @@ function blobTexture() {
   }), true, THREE.ClampToEdgeWrapping);
 }
 
-// Silhueta de um bosque distante, repetida em volta da praça
+// Bosque distante, visto de lado: uma faixa de árvores que se repete sem emenda. Cada copa é feita de tufos de folhas,
+// claros no alto, onde bate o sol, e escuros por baixo; entre uma copa e outra aparecem os troncos, na sombra, e ao pé
+// deles os arbustos da beira da mata. Por trás, uma fileira mais escura fecha os vãos, e o céu só aparece no recorte do alto
 function treelineTexture() {
-  const rand = seeded(71);
-  return textureOf(paint(2048, 256, (g, w, h) => {
-    g.fillStyle = 'rgb(34, 58, 27)';
-    g.fillRect(0, h * 0.66, w, h);
-    // duas passadas de copas grandes e uma de copas pequenas, que quebram o contorno
-    for (let pass = 0; pass < 3; pass++) for (let x = 0; x < w; x += (pass === 2 ? 20 : 40) + rand() * 54) {
-      const top = h * (0.1 + rand() * 0.4 + (pass === 1 ? 0.14 : 0)), radius = pass === 2 ? 22 + rand() * 34 : 60 + rand() * 70;
-      const v = 0.8 + rand() * 0.4 + pass * 0.1;
-      for (const dx of [-w, 0, w]) {   // copas que emendam nas bordas
-        for (let k = 0; k < 9; k++) {
-          g.fillStyle = `rgb(${36 * v}, ${62 * v + k * 3}, ${28 * v})`;
-          g.beginPath();
-          g.ellipse(x + dx + (hash2(x | 0, k) - 0.5) * radius * 1.4, top + radius * 0.5 + hash2(k, x | 0) * (h - top - radius * 0.5),
-            radius * (0.4 + hash2(x | 0, k + 9) * 0.3), radius * (0.36 + hash2(x | 0, k + 19) * 0.25), 0, 0, 7);
-          g.fill();
-        }
+  const rand = seeded(71), trees = [], bushes = [], behind = [];
+  const tufts = (count, size) => Array.from({ length: count }, () => {
+    const turn = rand() * 6.283, out = Math.sqrt(rand());
+    return [Math.cos(turn) * out * 1.08, Math.sin(turn) * out * 0.82, size * (0.6 + rand() * 0.8)];
+  }).sort((a, b) => b[1] - a[1]);   // de baixo para cima: os tufos claros do alto ficam por cima dos outros
+  for (let x = 0; x < 2048; x += 30 + rand() * 58) {
+    trees.push({ x, radius: 44 + rand() * 58, top: 0.06 + rand() * 0.34, tone: 0.84 + rand() * 0.3, back: rand(), trunk: rand() < 0.7, tufts: tufts(110, 0.12) });
+  }
+  for (let x = 0; x < 2048; x += 24 + rand() * 30) behind.push({ x, radius: 40 + rand() * 34, top: 0.26 + rand() * 0.16, tone: 0.42 + rand() * 0.2, tufts: tufts(46, 0.2) });
+  for (let x = 0; x < 2048; x += 16 + rand() * 30) bushes.push({ x, radius: 16 + rand() * 20, top: 0.6 + rand() * 0.12, tone: 0.5 + rand() * 0.3, tufts: tufts(16, 0.3) });
+  trees.sort((a, b) => a.back - b.back);
+  const texture = textureOf(paint(2048, 256, (g, w, h) => {
+    g.fillStyle = 'rgb(24, 40, 22)';   // o escuro de dentro da mata
+    g.fillRect(0, h * 0.68, w, h * 0.32);
+    const crown = (plant, cx, cy) => {
+      for (const [ox, oy, size] of plant.tufts) {
+        const lit = Math.min(1, Math.max(0, 0.5 - oy * 0.62)) * plant.tone;
+        g.fillStyle = `rgb(${24 + 78 * lit}, ${42 + 92 * lit}, ${22 + 34 * lit})`;
+        g.beginPath();
+        g.ellipse(cx + ox * plant.radius, cy + oy * plant.radius, size * plant.radius, size * plant.radius * 0.82, 0, 0, 7);
+        g.fill();
+      }
+    };
+    for (const dx of [-w, 0, w]) for (const tree of behind) crown(tree, tree.x + dx, h * tree.top + tree.radius * 0.82);   // tudo emenda nas bordas
+    for (const dx of [-w, 0, w]) {
+      for (const tree of trees) {
+        const cx = tree.x + dx, cy = h * tree.top + tree.radius * 0.82;
+        if (tree.trunk) { g.fillStyle = 'rgb(38, 33, 27)'; g.fillRect(cx - 1.5, cy, 3, h - cy); }
+        crown(tree, cx, cy);
       }
     }
+    for (const dx of [-w, 0, w]) for (const bush of bushes) crown(bush, bush.x + dx, h * bush.top + bush.radius);
   }));
+  texture.wrapT = THREE.ClampToEdgeWrapping;   // senão a base, que é cheia, vazaria em um fio na borda de cima
+  return texture;
+}
+// Morros ao longe, já quase da cor da bruma: duas linhas de relevo suave, que se repetem sem emenda.
+// A parte de baixo fica encoberta pela bruma, de onde só os cumes saem
+function hillsTexture() {
+  const rand = seeded(88);
+  const texture = textureOf(paint(2048, 256, (g, w, h) => {
+    for (const [height, tone] of [[0.82, 'rgb(152, 173, 204)'], [0.52, 'rgb(128, 152, 178)']]) {
+      const waves = [1, 2, 3, 5, 8, 13].map((k) => [k, rand() * 6.283, (0.4 + rand() * 0.6) / k]);
+      g.fillStyle = tone;
+      g.beginPath();
+      g.moveTo(0, h);
+      for (let x = 0; x <= w; x += 4) {
+        let n = 0;
+        for (const [k, phase, amp] of waves) n += amp * Math.sin(k * x / w * 6.283 + phase);
+        g.lineTo(x, h * (1 - height * (0.62 + 0.2 * n)));
+      }
+      g.lineTo(w, h);
+      g.fill();
+    }
+    const haze = g.createLinearGradient(0, h * 0.42, 0, h * 0.68);
+    haze.addColorStop(0, 'rgba(188, 206, 229, 0)');
+    haze.addColorStop(1, 'rgba(188, 206, 229, 1)');
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = haze;
+    g.fillRect(0, 0, w, h);
+  }));
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
 }
 
 // O céu é o mesmo na praça e na estrada, então é pintado uma vez só
@@ -309,5 +355,5 @@ const sharedSky = () => (sky ??= skyTexture());
 
 export {
   SUN, HAZE, PAVED, seeded, hash2, fbm, smooth, paint, textureOf, sharedSky, paverTextures, lawnTexture, tuftTexture,
-  clumpTexture, barkTextures, woodTextures, blobTexture, treelineTexture,
+  clumpTexture, barkTextures, woodTextures, blobTexture, treelineTexture, hillsTexture,
 };

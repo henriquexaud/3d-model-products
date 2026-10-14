@@ -2,16 +2,16 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LITE, measures, meters } from './config.js';
-import { renderer, scene, pmrem } from './scene.js';
+import { renderer, scene, pmrem, surroundings } from './scene.js';
 import { castBump, std, phys } from './materials.js';
 import { carRoot } from './layers.js';
 import { dimLamps } from './lamps.js';
-import { UP, V, rod, cyl, rbox, ball, mergeMeshes } from './geometry.js';
+import { UP, V, rod, rbox, ball, mergeMeshes } from './geometry.js';
 import {
   SUN, HAZE, PAVED, seeded, hash2, fbm, smooth, sharedSky, paverTextures, lawnTexture, tuftTexture,
   clumpTexture, barkTextures, woodTextures, blobTexture, treelineTexture,
 } from './praca-textures.js';
-import { DUSK, SUNLIGHT, MOONLIGHT, nightSky, showHeavens } from './night.js';
+import { DUSK, NIGHT_HAZE, SUNLIGHT, MOONLIGHT, nightSky, showHeavens } from './night.js';
 
 // ---------- Praça ----------
 // Cenário externo gerado por código, em metros: céu, sol com sombras, calçadão de blocos, gramado, bancos, árvores
@@ -197,7 +197,10 @@ function buildTree(o, bark, foliage, card) {
     b.set(rand() - 0.5, rand() - 0.5, rand() - 0.5).multiplyScalar(1.6).addScaledVector(pick[1], 0.5).addScaledVector(a, 0.7);
     b.y -= 0.2;
     q.setFromUnitVectors(UP, b.normalize()).multiply(roll.setFromAxisAngle(UP, rand() * 6.28));
-    const s = o.leaf * (0.75 + rand() * 0.5), v = (0.78 + rand() * 0.34) * deep;
+    // as folhas de dentro e de baixo da copa recebem menos luz do que as de fora: é isso que dá volume à copa
+    const inside = Math.hypot(pos.x - centre.x, (pos.y - centre.y) * 1.2, pos.z - centre.z) / spread;
+    const shade = (0.55 + 0.45 * smooth(0.3, 0.95, inside)) * (0.8 + 0.2 * smooth(low, top, pos.y));
+    const s = o.leaf * (0.75 + rand() * 0.5), v = (0.78 + rand() * 0.34) * deep * shade;
     leaves.setMatrixAt(k, m4.compose(pos, q, scale.set(s, s, s)));
     leaves.setColorAt(k, tint.setRGB(v * warm * (0.92 + rand() * 0.2), v, v * (0.85 + rand() * 0.2)));
     spheres.set([a.x, a.y * 0.8 + 0.25, a.z], k * 3);   // normal "de esfera": a copa é iluminada como um volume
@@ -216,7 +219,7 @@ function treeMaterials() {
   const barkMaps = barkTextures();
   const bark = std({ map: barkMaps.map, bumpMap: barkMaps.bump, bumpScale: 2.5, roughness: 0.95 });
   // um pouco de luz atravessa as folhas, por isso elas nunca ficam totalmente escuras
-  const foliage = phys({ map: clumpTexture(), alphaTest: 0.5, alphaToCoverage: true, roughness: 0.9, specularIntensity: 0.15, emissive: 0x3f5427, emissiveIntensity: 0.5 });
+  const foliage = phys({ map: clumpTexture(), alphaTest: 0.5, alphaToCoverage: true, roughness: 0.9, specularIntensity: 0.15, emissive: 0x3f5427, emissiveIntensity: 0.32 });
   foliage.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec3 aSphere;')
@@ -229,57 +232,57 @@ function treeMaterials() {
 }
 
 // Reflexos e luz ambiente de um cenário: uma foto em 360° tirada de onde o carro fica, sem ele e sem o que estiver em `hide`
+const PROBE = new THREE.Vector3(0, 0.9, 0);
 function snapshot(sky, hide) {
   const rough = pmrem.fromEquirectangular(sky);   // enquanto a foto é tirada, o céu sozinho serve de luz ambiente
   scene.environment = rough.texture;
-  const target = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
-  const probe = new THREE.CubeCamera(0.3, 300, target);
-  probe.position.set(0, 0.9, 0);
   const shown = [carRoot, ...hide].filter((o) => o.visible);
   for (const o of shown) o.visible = false;
   dimLamps(true);
   renderer.shadowMap.needsUpdate = true;
-  probe.update(renderer, scene);
+  const env = surroundings(scene, PROBE, 0.3, 300);
   dimLamps(false);
   for (const o of shown) o.visible = true;
-  const env = pmrem.fromCubemap(target.texture).texture;
-  target.dispose();
   rough.dispose();
   return env;
 }
 // Hora do dia de um cenário ao ar livre. Devolve a função que o veste de dia ou de noite: troca o céu, a bruma e a luz
-// (o sol vira a lua) e escurece o que não depende dela. `fog` é onde a bruma começa e onde encobre tudo; `extra` cuida
-// do que só aquele cenário tem. A foto dos reflexos é tirada na primeira vez em que cada hora é pedida
-function daylight(sun, treeline, fog, hide = [], extra) {
+// (o sol vira a lua) e escurece o que não depende dela, como o fundo pintado em `backdrops` (cada um pode trazer em
+// `userData.night` a cor que o tinge à noite). `fog` é onde a bruma começa e onde encobre tudo; `extra` cuida do que
+// só aquele cenário tem. A foto dos reflexos é tirada na primeira vez em que cada hora é pedida
+function daylight(sun, backdrops, fog, hide = [], extra) {
   const envs = [];
   return (night) => {
     const sky = night ? nightSky() : sharedSky(), light = night ? MOONLIGHT : SUNLIGHT, kit = treeMaterials();
     sun.color.setHex(light.color);
     sun.intensity = light.intensity;
-    treeline.material.color.setHex(night ? 0x0d121b : 0xffffff);
-    kit.foliage.emissiveIntensity = night ? 0.02 : 0.5;
+    for (const backdrop of backdrops) backdrop.material.color.setHex(night ? backdrop.userData.night ?? 0x0d121b : 0xffffff);
+    kit.foliage.emissiveIntensity = night ? 0.02 : 0.32;
     kit.blob.opacity = night ? 0.3 : 0.5;
     extra?.(night);
     showHeavens(night);
     scene.background = sky;
-    scene.fog.color.copy(night ? DUSK : HAZE);
+    // a bruma tem a cor do céu no horizonte, para o chão sumir nele sem deixar uma linha. No celular ela não passa
+    // pelo mapeamento de tons, e vale a cor que se quer ver na tela
+    if (LITE) scene.fog.color.copy(night ? DUSK : HAZE); else scene.fog.color.copy(night ? NIGHT_HAZE : HAZE);
     [scene.fog.near, scene.fog.far] = fog;
     scene.environment = envs[+night] ??= snapshot(sky, hide);
   };
 }
 
-// Poste de luz: coluna de ferro fundido de 3,3 m com um globo leitoso no alto
+// Poste de luz: coluna de ferro fundido torneada, com base larga, anéis e, no alto, a taça onde se apoia o globo leitoso,
+// fechado por uma tampa com ponteira. `GLOBE` é a altura do centro do globo
+const GLOBE = 3.485;
 function buildLampPost(iron, opal) {
-  const post = new THREE.Group();
-  post.add(cyl(0.085, 0.42, 'y', 0, 0.21, 0, iron, 20, 0.06));
-  post.add(cyl(0.07, 0.035, 'y', 0, 0.44, 0, iron, 20));
-  post.add(rod(V(0, 0.44, 0), V(0, 3.24, 0), 0.042, iron, 0.03, 16));
-  post.add(cyl(0.05, 0.07, 'y', 0, 3.275, 0, iron, 20, 0.105));   // taça onde o globo se apoia
-  mergeMeshes(post);
+  const post = new THREE.Group(), turned = (profile) => new THREE.Mesh(new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), 24), iron);
+  const column = turned([[0, 0], [0.125, 0], [0.125, 0.05], [0.105, 0.07], [0.105, 0.2], [0.092, 0.23], [0.075, 0.42], [0.058, 0.56], [0.067, 0.585],
+    [0.067, 0.615], [0.05, 0.64], [0.044, 1.2], [0.053, 1.22], [0.053, 1.25], [0.042, 1.27], [0.034, 3.02], [0.047, 3.05], [0.047, 3.09],
+    [0.036, 3.12], [0.05, 3.2], [0.095, 3.27], [0.112, 3.3], [0.112, 3.315], [0, 3.315]]);
+  const cap = turned([[0.078, GLOBE + 0.166], [0.07, GLOBE + 0.182], [0.03, GLOBE + 0.197], [0.013, GLOBE + 0.215], [0.017, GLOBE + 0.232], [0, GLOBE + 0.26]]);
   const globe = new THREE.Mesh(new THREE.SphereGeometry(0.19, 32, 20), opal);
-  globe.position.y = 3.47;
-  globe.castShadow = true;
-  post.add(globe);
+  globe.position.y = GLOBE;
+  for (const part of [column, cap, globe]) part.castShadow = part.receiveShadow = true;
+  post.add(column, cap, globe);
   return post;
 }
 
@@ -325,7 +328,7 @@ function buildPraca() {
   const woods = treelineTexture();
   woods.repeat.set(6, 1);
   const treeline = new THREE.Mesh(new THREE.CylinderGeometry(88, 88, 15, 64, 1, true),
-    new THREE.MeshBasicMaterial({ map: woods, alphaTest: 0.5, side: THREE.BackSide }));
+    new THREE.MeshBasicMaterial({ map: woods, alphaTest: 0.5, alphaToCoverage: true, side: THREE.BackSide }));
   treeline.position.y = 7.4;
   group.add(treeline);
 
@@ -392,18 +395,18 @@ function buildPraca() {
   [[PAVED.x0 - 0.42, 5.2], [PAVED.x0 - 0.42, -5.4], [PAVED.x1 + 0.42, -1.6]].forEach(([x, z], i) => {
     const lamp = buildLampPost(iron, opal), halo = new THREE.Sprite(shine);
     lamp.position.set(x, 0, z);
-    halo.position.y = 3.47;
+    halo.position.y = GLOBE;
     halo.scale.setScalar(1.5);
     lamp.add(halo);
     if (!LITE || i) {   // no celular o poste mais distante só brilha, sem iluminar
       const bulb = new THREE.PointLight(0xffc98f, 0, 0, 2);
-      bulb.position.y = 3.47;
+      bulb.position.y = GLOBE;
       lamp.add(bulb);
       bulbs.push(bulb);
     }
     group.add(lamp);
   });
-  const dress = daylight(sun, treeline, [30, 135], [], (night) => {
+  const dress = daylight(sun, [treeline], [30, 170], [], (night) => {
     opal.emissiveIntensity = night ? 5 : 0;
     shine.visible = night;
     for (const bulb of bulbs) bulb.intensity = night ? 36 : 0;
@@ -411,7 +414,7 @@ function buildPraca() {
 
   measures.bench = '1,60 × 0,69 × 0,89 m';
   measures.tree = `${meters(hero.userData.height)} m de altura · copa de ${meters(hero.userData.crown)} m`;
-  measures.lamp = '3,66 m de altura · globo de Ø 38 cm';
+  measures.lamp = '3,75 m de altura · globo de Ø 38 cm';
   return { group, trees, dress };
 }
 

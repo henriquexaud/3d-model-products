@@ -17,7 +17,9 @@ const CAR = {
   torque: [[900, 320], [2000, 400], [3000, 450], [4000, 490], [5000, 525], [6000, 540], [7000, 530], [8000, 495], [9000, 445]],   // N·m
   topSpeed: 320 / 3.6,                  // m/s
 };
-const DRIVER = { gain: 0.8, accel: 4.5, decel: 5.5 };   // o quanto ele pede de aceleração (1/s) e os limites (m/s²)
+// o quanto ele pede de aceleração (1/s) e os limites (m/s²). A frenagem chega perto do que os pneus aguentam (~0,9 g)
+// e continua progressiva: o pedal entra em uma fração de segundo e alivia à medida que a velocidade pedida se aproxima
+const DRIVER = { gain: 0.8, accel: 4.5, decel: 9 };
 
 function torqueAt(rpm) {
   const T = CAR.torque;

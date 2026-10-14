@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { LITE, AX_F } from './config.js';
-import { scene } from './scene.js';
+import { LITE, SHUTTER, AX_F } from './config.js';
+import { renderer, scene, shadowsDirty } from './scene.js';
 import { std } from './materials.js';
 import { UP } from './geometry.js';
 import {
-  SUN, seeded, hash2, fbm, smooth, paint, textureOf, lawnTexture, tuftTexture, treelineTexture,
+  SUN, seeded, hash2, fbm, smooth, paint, textureOf, lawnTexture, tuftTexture, treelineTexture, hillsTexture,
 } from './praca-textures.js';
 import { cards, buildTree, treeMaterials, daylight } from './praca.js';
 import { LOOP, FEATURES, TO_FRONT } from './ride.js';
@@ -19,6 +19,7 @@ const RAIL = EDGE.left - 0.45;                                          // onde 
 const POSTS = 4;                                                        // distância entre os postes da defensa
 const SPAN = 520, WRAP = LOOP;                                          // comprimento desenhado e trecho em que árvores e irregularidades se repetem
 const TILE = 2.5, TUFTS = 40;                                           // ladrilho do asfalto e do gramado; trecho em que os tufos se repetem
+const WOODS = 95;                                                       // trecho em que a mata do fundo se repete
 let road = null;
 
 // A estrada só é montada na primeira vez em que é pedida
@@ -148,26 +149,40 @@ function meanTone(texture) {
   for (let i = 1; i < d.length; i += 4 * 97, count++) sum += Math.pow(d[i] / 255, 2.2);
   return sum / count;
 }
-// Chão que corre. A mesma textura, ampliada, clareia e escurece trechos largos, para o ladrilho não se repetir à vista;
-// e com a velocidade ela se desfaz em riscos no sentido do movimento, como numa foto com o obturador aberto
-function streaked(material, blur) {
-  const mean = { value: meanTone(material.map) };
+// Chão que corre. Com a velocidade a textura ganha o rastro do movimento: cada ponto é a média dela mesma ao longo do trecho
+// que passa durante a exposição do quadro (`trail`, em metros; `span` é o comprimento de uma repetição da textura). Parado,
+// o rastro é nulo e a textura é a mesma, sem troca nem salto. Com `vary`, a mesma textura, ampliada 13 vezes, clareia e
+// escurece trechos largos, para o ladrilho não se repetir à vista; `tiles` conta os ladrilhos inteiros já percorridos,
+// para essa variação correr junto com o chão em vez de pular a cada ladrilho
+const TAPS = 12, WIDE = 13;
+function streaked(material, motion, span = TILE, vary = true) {
+  const mean = { value: vary ? meanTone(material.map) : 1 };
+  // o filtro anisotrópico estica cada amostra no sentido do movimento, então as 12 cobrem o rastro sem deixar falhas
+  const tap = renderer.capabilities.isWebGL2 ? 'textureGrad(map, vMapUv + vec2(0.0, at * streak), dx, dy)' : 'texture2D(map, vMapUv + vec2(0.0, at * streak))';
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uBlur = blur;
+    shader.uniforms.uTrail = motion.trail;
+    shader.uniforms.uTiles = motion.tiles;
     shader.uniforms.uMean = mean;
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uBlur, uMean;')
+      .replace('#include <common>', '#include <common>\nuniform float uTrail, uTiles, uMean;')
       .replace('#include <map_fragment>', `
-        vec4 sharp = texture2D(map, vMapUv);
-        vec4 smear = 0.5 * (texture2D(map, vec2(vMapUv.x, vMapUv.y * 0.03)) + texture2D(map, vec2(vMapUv.x + 0.37, vMapUv.y * 0.017 + 0.5)));
-        float wide = texture2D(map, vMapUv * 0.0731 + 0.31).g / uMean;
-        diffuseColor *= mix(sharp, smear, uBlur) * mix(1.0, wide, 0.35);`);
+        vec2 dx = dFdx(vMapUv), dy = dFdy(vMapUv);
+        float streak = uTrail / ${span.toFixed(2)}, gap = streak / ${TAPS}.0;
+        if (gap > max(abs(dx.y), abs(dy.y))) { dx = vec2(max(abs(dx.x), abs(dy.x)), 0.0); dy = vec2(0.0, gap); }
+        vec4 trail = vec4(0.0);
+        for (int i = 0; i < ${TAPS}; i++) {
+          float at = (float(i) + 0.5) / ${TAPS}.0 - 0.5;
+          trail += ${tap};
+        }
+        float wide = ${vary ? `texture2D(map, (vMapUv + vec2(0.0, uTiles)) / ${WIDE}.0 + 0.31).g / uMean` : '1.0'};
+        diffuseColor *= trail / ${TAPS}.0 * mix(1.0, wide, 0.35);`);
   };
+  material.customProgramCacheKey = () => `streaked${span}${vary}`;
   return material;
 }
 
 function buildRoad() {
-  const group = new THREE.Group(), rand = seeded(57), blur = { value: 0 };
+  const group = new THREE.Group(), rand = seeded(57), blur = { trail: { value: 0 }, tiles: { value: 0 } };
   scene.add(group);
   const flat = (mesh, x, y) => { mesh.rotation.x = -Math.PI / 2; mesh.position.set(x, y, 0); group.add(mesh); return mesh; };
 
@@ -193,7 +208,7 @@ function buildRoad() {
   const paintMap = markingsTexture(EDGE.left - 1.4, width + 2.8);
   paintMap.repeat.set(1, SPAN / DASH);
   const markings = flat(new THREE.Mesh(new THREE.PlaneGeometry(width + 2.8, SPAN),
-    std({ map: paintMap, transparent: true, depthWrite: false, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })), middle, 0.003);
+    streaked(std({ map: paintMap, transparent: true, depthWrite: false, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), blur, DASH, false)), middle, 0.003);
   markings.renderOrder = 1;
   asphalt.receiveShadow = markings.receiveShadow = true;
 
@@ -218,13 +233,26 @@ function buildRoad() {
     flat(new THREE.Mesh(new THREE.PlaneGeometry(250, SPAN), lawn), (side < 0 ? EDGE.left : EDGE.right) + side * 124.75, -0.02).receiveShadow = true;
   }
 
-  // bosque distante, que fecha o horizonte
+  // fundo: dos dois lados, uma faixa de mata acompanha a estrada de longe e corre com ela; mais ao longe, morros na bruma
+  // fecham o horizonte. Para a frente e para trás a estrada some na bruma, sem nada que a atravesse
   const woods = treelineTexture();
-  woods.repeat.set(14, 1);
-  const treeline = new THREE.Mesh(new THREE.CylinderGeometry(210, 210, 17, 64, 1, true),
-    new THREE.MeshBasicMaterial({ map: woods, alphaTest: 0.5, side: THREE.BackSide }));
-  treeline.position.y = 8.4;
-  group.add(treeline);
+  woods.repeat.set(SPAN / WOODS, 1);
+  const woodland = new THREE.MeshBasicMaterial({ map: woods, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide });
+  const backdrops = [RAIL - 100, EDGE.right + 122].map((x) => {
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(SPAN, 16), woodland);
+    wall.rotation.y = Math.PI / 2;
+    wall.position.set(x, 7.6, 0);
+    group.add(wall);
+    return wall;
+  });
+  const ridges = hillsTexture();
+  ridges.repeat.set(5, 1);
+  const hills = new THREE.Mesh(new THREE.CylinderGeometry(330, 330, 60, 64, 1, true),
+    new THREE.MeshBasicMaterial({ map: ridges, alphaTest: 0.5, alphaToCoverage: true, side: THREE.BackSide, fog: false }));
+  hills.position.y = 29;
+  hills.userData.night = 0x565f6f;   // à noite, a bruma pintada neles fica da cor da bruma da noite
+  group.add(hills);
+  backdrops.push(hills);
 
   // defensa metálica: lâmina de aço em "W" com o centro a 60 cm do chão. A lâmina é igual em todo o comprimento, só os postes correm
   const steel = std({ color: 0x9da2a6, metalness: 0.85, roughness: 0.42, side: THREE.DoubleSide });
@@ -239,15 +267,25 @@ function buildRoad() {
   beam.setIndex(I);
   beam.computeVertexNormals();
   group.add(new THREE.Mesh(beam, steel));
+  // poste em perfil "C", com o calço que afasta a lâmina e o parafuso que a prende, no vale do meio
   const postGeo = mergeGeometries([
-    new THREE.BoxGeometry(0.06, 0.78, 0.13).translate(RAIL - 0.085, 0.39, 0),
-    new THREE.BoxGeometry(0.055, 0.28, 0.13).translate(RAIL - 0.028, 0.6, 0),   // calço entre o poste e a lâmina
+    new THREE.BoxGeometry(0.006, 0.78, 0.12).translate(RAIL - 0.113, 0.39, 0),
+    new THREE.BoxGeometry(0.06, 0.78, 0.006).translate(RAIL - 0.086, 0.39, -0.057),
+    new THREE.BoxGeometry(0.06, 0.78, 0.006).translate(RAIL - 0.086, 0.39, 0.057),
+    new THREE.BoxGeometry(0.056, 0.28, 0.1).translate(RAIL - 0.028, 0.6, 0),
+    new THREE.CylinderGeometry(0.014, 0.014, 0.012, 6).rotateZ(Math.PI / 2).translate(RAIL + 0.006, 0.6, 0),
   ]);
   const posts = new THREE.InstancedMesh(postGeo, steel, SPAN / POSTS);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scale = new THREE.Vector3(), tint = new THREE.Color();
   for (let i = 0; i < posts.count; i++) posts.setMatrixAt(i, m4.makeTranslation(0, 0, -SPAN / 2 + i * POSTS));
   posts.frustumCulled = false;
   group.add(posts);
+  // refletivos âmbar presos à lâmina, um a cada quatro postes
+  const studs = new THREE.InstancedMesh(new THREE.BoxGeometry(0.004, 0.055, 0.085).translate(RAIL + 0.01, 0.6, 0.16),
+    std({ color: 0xf0a31c, roughness: 0.3, emissive: 0xf0a31c, emissiveIntensity: 0.12 }), Math.ceil(SPAN / DASH));
+  for (let i = 0; i < studs.count; i++) studs.setMatrixAt(i, m4.makeTranslation(0, 0, -SPAN / 2 + i * DASH));
+  studs.frustumCulled = false;
+  group.add(studs);
 
   // tufos de grama nas margens, mais ralos longe da pista. O desenho se repete a cada 40 m
   const tuftGeo = cards(0.3, 0.14, true), base = LITE ? 700 : 2400, repeats = 4;
@@ -287,13 +325,17 @@ function buildRoad() {
     trees.push(holder);
   }
 
-  // O cenário anda `distance` metros para trás; `speed` (m/s) define o quanto o chão se desfaz em riscos
+  // O cenário anda `distance` metros para trás; `speed` (m/s) define o comprimento do rastro: o que passa durante a exposição
   function update(distance, speed) {
-    blur.value = smooth(0.4, 14, speed);
-    asphalt.material.bumpScale = 1.3 * (1 - blur.value);
+    const trail = speed * SHUTTER;
+    blur.trail.value = trail;
+    blur.tiles.value = Math.floor(distance / TILE) % WIDE;
+    asphalt.material.bumpScale = 1.3 / Math.hypot(1, trail / 0.012);   // o relevo das pedrinhas, de ~12 mm, se dilui no rastro
     tar.map.offset.y = tar.bump.offset.y = lawnMap.offset.y = (distance / TILE) % 1;
     paintMap.offset.y = (distance / DASH) % 1;
     posts.position.z = distance % POSTS;
+    studs.position.z = distance % DASH;
+    woods.offset.x = (distance / WOODS) % 1;
     grass.position.z = distance % TUFTS;
     for (const holder of trees) holder.position.z = (holder.userData.start + distance) % WRAP - WRAP / 2;
     // cada irregularidade passa sob o centro de massa do carro quando a distância percorrida chega à posição dela
@@ -301,8 +343,23 @@ function buildRoad() {
   }
   update(0, 0);
 
+  // O carro muda de faixa e de rumo, mas continua na origem: é a estrada inteira que se desloca e gira em volta dele.
+  // `side` é o quanto ele está à esquerda da faixa da direita (m) e `heading` o rumo (rad, positivo para a esquerda).
+  // O sol vai junto, porque faz parte do cenário, e a sombra dele continua centrada no carro
+  let placed = 0;
+  function shift(side, heading) {
+    if (Math.abs(side + heading * 20 - placed) < 1e-5) return;
+    placed = side + heading * 20;
+    group.rotation.y = -heading;
+    group.position.set(side * Math.cos(heading), 0, side * Math.sin(heading));
+    focus.set(-0.5 - side, 0, 0);
+    sun.position.copy(focus).addScaledVector(SUN, 45);
+    sun.target.position.copy(focus);
+    shadowsDirty();
+  }
+
   // os reflexos são fotografados com a estrada vazia: as árvores passam, e não poderiam ficar paradas neles
-  return { group, update, dress: daylight(sun, treeline, [60, 260], trees) };
+  return { group, update, shift, dress: daylight(sun, backdrops, [60, 260], trees) };
 }
 
 export { road, ensureRoad, LANE, DASH, POSTS };

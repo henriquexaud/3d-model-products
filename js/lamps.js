@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { LITE, X0, layers, state, look } from './config.js';
-import { scene } from './scene.js';
+import { scene, selfLight } from './scene.js';
 import { headGlass, ledGlass, tailGlass } from './materials.js';
 import { M } from './layers.js';
 import { smooth, paint, textureOf } from './praca-textures.js';
@@ -74,10 +74,11 @@ const glare = textureOf(paint(256, 256, (g) => {
 // Um halo por lente. `facing` é para onde a lente aponta: de lado ou por trás o clarão some.
 // `power` diz o quanto ele aparece, dado o brilho das luzes (de 0 a 1) e o do freio
 const halos = [];
-function halo(x, y, z, facing, size, color, power) {
+function halo(x, y, z, facing, size, color, power, boost = 1.6) {
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glare, color, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, toneMapped: false, fog: false,
+    map: glare, color, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, toneMapped: !LITE, fog: false,
   }));
+  selfLight(sprite.material.color, boost);
   sprite.position.set(x, y, z);
   sprite.renderOrder = 5;
   sprite.visible = false;
@@ -87,7 +88,8 @@ function halo(x, y, z, facing, size, color, power) {
 for (const s of [-1, 1]) {
   halo(s * 0.677, 0.609, -1.857, [s * 0.12, -0.04, -1], 1.25, 0xdfe9ff, (lit) => lit);                              // farol
   halo(s * 0.765, 0.72, -1.64, [s * 0.25, 0.3, -1], 0.5, 0xeaf1ff, (lit) => 0.4 * lit);                             // luz diurna
-  halo(s * 0.772, 0.875, 2.05, [s * 0.1, 0, 1], 0.8, 0xff2a12, (lit, stop) => Math.min(1, 0.4 * lit + stop));      // lanterna
+  // lanterna: menos reforço, porque um vermelho forte demais vira laranja no mapeamento de tons
+  halo(s * 0.772, 0.875, 2.05, [s * 0.1, 0, 1], 0.8, 0xff1508, (lit, stop) => Math.min(1, 0.4 * lit + stop), 0.75);
 }
 
 const lamps = { level: 0, brake: 0, dark: false };

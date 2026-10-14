@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { LITE } from './config.js';
-import { renderer, scene } from './scene.js';
+import { renderer, scene, selfLight } from './scene.js';
 import { SUN, seeded, fbm, smooth, paint, textureOf } from './praca-textures.js';
 
 // ---------- Noite ----------
 // O que os cenários ao ar livre ganham ao anoitecer: céu escuro com nuvens ralas, estrelas e a lua,
 // que fica onde de dia está o sol. Assim as sombras caem para o mesmo lado e só a luz muda
-const DUSK = new THREE.Color(0.030, 0.046, 0.088);   // bruma do horizonte à noite
+const NIGHT_HAZE = new THREE.Color(0.046, 0.070, 0.125);   // luz da bruma do horizonte à noite...
+const DUSK = new THREE.Color(0.030, 0.046, 0.088);         // ...e a cor com que ela aparece na tela
 const SUNLIGHT = { color: 0xfff0dc, intensity: 6.5 }, MOONLIGHT = { color: 0x9db6ea, intensity: 1.5 };
 
 // Quanto do céu as nuvens encobrem em uma direção
@@ -36,9 +37,9 @@ function nightSkyTexture() {
         r += glow * 0.85; g += glow * 0.92; b += glow;
       }
       const o = (j * W + i) * 4;
-      data[o] = half(r + (0.046 - r) * horizon);
-      data[o + 1] = half(g + (0.070 - g) * horizon);
-      data[o + 2] = half(b + (0.125 - b) * horizon);
+      data[o] = half(r + (NIGHT_HAZE.r - r) * horizon);
+      data[o + 1] = half(g + (NIGHT_HAZE.g - g) * horizon);
+      data[o + 2] = half(b + (NIGHT_HAZE.b - b) * horizon);
       data[o + 3] = one;
     }
   }
@@ -65,8 +66,8 @@ function starField() {
   geometry.setAttribute('position', new THREE.BufferAttribute(position, 3));
   geometry.setAttribute('aLook', new THREE.BufferAttribute(look, 2));
   const stars = new THREE.Points(geometry, new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    uniforms: { uPixel: { value: renderer.getPixelRatio() } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: !LITE,
+    uniforms: { uPixel: { value: renderer.getPixelRatio() }, uTint: { value: selfLight(new THREE.Color(0.86, 0.91, 1.0)) } },
     vertexShader: `
       attribute vec2 aLook;
       uniform float uPixel;
@@ -77,10 +78,12 @@ function starField() {
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }`,
     fragmentShader: `
+      uniform vec3 uTint;
       varying float vBright;
       void main() {
         float away = length(gl_PointCoord - 0.5) * 2.0;
-        gl_FragColor = vec4(0.86, 0.91, 1.0, vBright * (1.0 - smoothstep(0.3, 1.0, away)));
+        gl_FragColor = vec4(uTint, vBright * (1.0 - smoothstep(0.3, 1.0, away)));
+        #include <tonemapping_fragment>
       }`,
   }));
   // só a câmera principal as enxerga (camada 1): nas fotos pequenas dos reflexos cada estrela viraria uma bola de luz
@@ -105,7 +108,8 @@ function moonDisc() {
     }
   }), true, THREE.ClampToEdgeWrapping);
   const moon = new THREE.Mesh(new THREE.CircleGeometry(3.6, 48),
-    new THREE.MeshBasicMaterial({ map: face, transparent: true, depthWrite: false, fog: false, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ map: face, transparent: true, depthWrite: false, fog: false, toneMapped: !LITE }));
+  selfLight(moon.material.color);
   moon.position.copy(SUN).multiplyScalar(280);
   moon.lookAt(0, 0, 0);
   return moon;
@@ -123,4 +127,4 @@ function showHeavens(on) {
   if (heavens) heavens.visible = on;
 }
 
-export { DUSK, SUNLIGHT, MOONLIGHT, nightSky, showHeavens };
+export { DUSK, NIGHT_HAZE, SUNLIGHT, MOONLIGHT, nightSky, showHeavens };

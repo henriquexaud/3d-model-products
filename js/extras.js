@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { X0, layers } from './config.js';
-import { mats } from './materials.js';
+import { mats, emblem } from './materials.js';
 import { G, M, carve } from './layers.js';
 import { V, S, rod, cyl, rbox, beam, tube, polyPipe, mergeMeshes } from './geometry.js';
 import { ENGINE } from './mechanics.js';
@@ -13,6 +13,7 @@ const FRONT_FACE = 0.5505;   // plano logo à frente das polias
 const spinning = [];         // { group, ratio }: giram com o virabrequim, cada um na sua relação
 const fans = [];
 const pedals = {};
+const helm = { pivot: null, axis: new THREE.Vector3() };   // o volante: o grupo que gira e o eixo da coluna
 let fanSpeed = 0, clock = 0;
 
 // Referencial de uma bancada de cilindros: +y segue o eixo dos cilindros e +x aponta para o lado do escape
@@ -197,6 +198,26 @@ function buildCabin() {
   pedals.throttle = hinge(V(-0.103, 0.208, -0.986), [carve('interior', 'metal:interior', [-0.126, 0.204, -1.039, -0.080, 0.391, -0.980])]);
   pedals.brake = hinge(V(-0.223, 0.66, -0.995), [carve('interior', 'metal:interior', [-0.302, 0.342, -0.943, -0.188, 0.433, -0.896]),
     carve('interior', 'interior_dark:interior', [-0.262, 0.367, -1.007, -0.185, 0.669, -0.911])]);
+
+  // o volante gira em torno da coluna, junto com as rodas da frente. O centro e o eixo saem da tampa do cubo, que é
+  // um disco plano; a coluna, com as borboletas do câmbio, fica parada. No lugar da tampa lisa entra o emblema
+  const lid = cabin.children.find((o) => o.name === 'steering_centre');
+  if (lid) {
+    const normal = lid.geometry.attributes.normal, one = V(0, 0, 0);
+    for (let i = 0; i < normal.count; i++) helm.axis.add(one.fromBufferAttribute(normal, i));
+    helm.axis.transformDirection(lid.matrixWorld);
+    if (helm.axis.z < 0) helm.axis.negate();   // aponta para o motorista
+    helm.pivot = hinge(new THREE.Box3().setFromObject(lid).getCenter(V(0, 0, 0)), cabin.children.filter((o) => /^steering_(?!column)/.test(o.name)));
+    const badge = new THREE.Mesh(new THREE.CircleGeometry(0.0205, 40), emblem);
+    badge.position.copy(helm.axis).multiplyScalar(0.0012);
+    badge.quaternion.setFromUnitVectors(V(0, 0, 1), helm.axis);
+    badge.receiveShadow = true;
+    helm.pivot.add(badge);
+  }
+}
+// Gira o volante `angle` radianos; positivo para a esquerda, como o motorista o vê
+function turnWheel(angle) {
+  helm.pivot?.quaternion.setFromAxisAngle(helm.axis, angle);
 }
 
 function buildExtras() {
@@ -228,4 +249,4 @@ function poseExtras(sim, dt) {
   }
 }
 
-export { buildExtras, poseExtras };
+export { buildExtras, poseExtras, turnWheel };

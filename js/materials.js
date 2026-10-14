@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { LITE } from './config.js';
-import { renderer } from './scene.js';
+import { renderer, onScreen } from './scene.js';
 
 // ---------- Texturas e materiais ----------
 // Texturas procedurais (desenhadas em canvas, sem arquivos externos)
@@ -80,8 +80,22 @@ const finMap = canvasTexture(64, radiatorFins, 1, true);
 const grilleMap = canvasTexture(64, grilleMesh, 1, true);
 finMap.repeat.set(8, 2);
 
+// Emblema redondo, usado no centro do volante e nas calotas: alumínio acetinado com um friso escuro e um botão preto
+function badge(g, s) {
+  const ring = (r, width, tone) => { g.strokeStyle = tone; g.lineWidth = width * s; g.beginPath(); g.arc(s / 2, s / 2, r * s, 0, 7); g.stroke(); };
+  g.fillStyle = 'rgb(168,170,175)';
+  g.fillRect(0, 0, s, s);
+  ring(0.405, 0.02, 'rgb(40,41,44)');
+  g.fillStyle = 'rgb(14,14,16)';
+  g.beginPath();
+  g.arc(s / 2, s / 2, 0.225 * s, 0, 7);
+  g.fill();
+  ring(0.172, 0.016, 'rgb(205,207,211)');
+}
+
 const std = (p) => new THREE.MeshStandardMaterial(p);
 const phys = (p) => new THREE.MeshPhysicalMaterial(p);
+const emblem = phys({ map: canvasTexture(256, badge, 1, true), metalness: 0.9, roughness: 0.34, clearcoat: 1.0, clearcoatRoughness: 0.06 });
 
 // As peças do modelo original não trazem coordenadas de textura. Aqui o relevo (e, se pedido, a cor) é projetado
 // pelos três eixos da própria peça, com `tiles` repetições por metro
@@ -115,23 +129,42 @@ function triplanar(material, tiles, colour = false) {
   return material;
 }
 
-// Pintura metálica com verniz
+// Pintura automotiva em duas camadas. Por baixo, a tinta: dá a cor e espalha a luz, mais ou menos metálica conforme
+// o acabamento de cada cor (COLORS, em config.js). Por cima, o verniz: liso, espelha o entorno com nitidez e é ele
+// que mostra as curvas da carroceria
+const paintFlake = { value: 1 };   // o quanto as lamelas da cor atual aparecem
 const bodyMaterial = phys({
-  metalness: 0.75, roughness: 0.38, clearcoat: 1.0, clearcoatRoughness: 0.04, envMapIntensity: 1.1
+  metalness: 0.6, roughness: 0.45, clearcoat: 1.0, clearcoatRoughness: 0.03, envMapIntensity: 1.0
 });
-// Lamelas metálicas: sob o verniz, cada grãozinho da tinta reflete numa direção um pouco diferente. Só de perto dá para ver
 if (!LITE) bodyMaterial.onBeforeCompile = (shader) => {
+  shader.uniforms.uFlake = paintFlake;
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nvarying vec3 vFlake;')
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFlake = position * 1100.0;');
+    .replace('#include <common>', '#include <common>\nvarying vec3 vPaint;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPaint = position;');
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nvarying vec3 vFlake;')
+    .replace('#include <common>', `#include <common>
+      varying vec3 vPaint;
+      uniform float uFlake;
+      vec3 flakeTilt(vec3 cell) {
+        return fract(sin(vec3(dot(cell, vec3(127.1, 311.7, 74.7)), dot(cell, vec3(269.5, 183.3, 246.1)), dot(cell, vec3(113.5, 271.9, 124.6)))) * 43758.5453) - 0.5;
+      }`)
+    // Lamelas metálicas: cada grãozinho da tinta reflete numa direção um pouco diferente. De perto têm 0,2 mm; de longe
+    // não dá para ver cada uma, só o cintilar do conjunto, por isso o grão acompanha o tamanho do pixel
     .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-      vec3 flake = floor(vFlake);
-      vec3 tilt = fract(sin(vec3(dot(flake, vec3(127.1, 311.7, 74.7)), dot(flake, vec3(269.5, 183.3, 246.1)), dot(flake, vec3(113.5, 271.9, 124.6)))) * 43758.5453) - 0.5;
-      normal = normalize(normal + tilt * 0.13 * (1.0 - smoothstep(0.7, 2.2, length(fwidth(vFlake)))));`);
+      float paintPixel = length(fwidth(vPaint));
+      float grain = max(0.0, log2(paintPixel * 3600.0)), coarse = floor(grain);
+      vec3 flake = mix(flakeTilt(floor(vPaint * 5000.0 * exp2(-coarse))), flakeTilt(floor(vPaint * 2500.0 * exp2(-coarse))), grain - coarse);
+      normal = normalize(normal + flake * uFlake * 0.13 / (1.0 + 0.3 * grain));`)
+    // Casca de laranja: o verniz seca com uma ondulação de poucos milímetros, que deforma de leve o que ele espelha
+    .replace('#include <clearcoat_normal_fragment_maps>', `#include <clearcoat_normal_fragment_maps>
+      vec3 peelAt = vPaint * 380.0;
+      vec3 peel = sin(peelAt.yzx + 1.7 * sin(peelAt.zxy * 0.61));
+      clearcoatNormal = normalize(clearcoatNormal + peel * 0.0022 * (1.0 - smoothstep(0.002, 0.008, paintPixel)));`);
 };
 const alloy = std({ color: 0x8f9399, metalness: 1.0, roughness: 0.28 });
+// Rodas de liga leve em dois tons, sob verniz: a face torneada, clara e lustrosa, e o corpo pintado de grafite
+const alloyFace = phys({ color: 0xb6b9be, metalness: 1.0, roughness: 0.24, clearcoat: 0.7, clearcoatRoughness: 0.05 });
+const alloyBody = phys({ color: 0x4d5055, metalness: 0.85, roughness: 0.38, clearcoat: 0.7, clearcoatRoughness: 0.08 });
 const darkMetal = std({ color: 0x2a2b2e, metalness: 1.0, roughness: 0.35 });
 // Lentes dos faróis e das lanternas. Apagadas, são vidro escuro que espelha o entorno; o brilho de cada uma é dado em lamps.js
 const headGlass = std({ color: 0x1c1f24, metalness: 0.85, roughness: 0.08, emissive: 0xe4edff, emissiveIntensity: 0 });
@@ -147,19 +180,21 @@ const MATERIALS = {
     ? phys({ color: 0x9fb4bd, metalness: 0, roughness: 0, transparent: true, opacity: 0.3, envMapIntensity: 1.5 })
     : phys({
       color: 0xcfd8dc, metalness: 0, roughness: 0, transmission: 1.0, ior: 1.5, thickness: 0.01,
-      envMapIntensity: 1.2
+      envMapIntensity: 1.0
     }),
-  Leather: triplanar(std({ color: 0x26262a, roughness: 0.6, bumpMap: leatherBump, bumpScale: 0.6 }), 7),
-  Leather_red: triplanar(std({ color: 0x5a4030, roughness: 0.62, bumpMap: leatherBump, bumpScale: 0.6 }), 7),
+  // couro: quase preto, de grão miúdo, com o brilho macio que ele ganha quando a luz bate de raspão
+  Leather: triplanar(phys({ color: 0x1b1b1e, roughness: 0.52, bumpMap: leatherBump, bumpScale: 0.9, sheen: 0.4, sheenRoughness: 0.45, sheenColor: 0x66666c }), 7),
+  Leather_red: triplanar(phys({ color: 0x6a4a31, roughness: 0.56, bumpMap: leatherBump, bumpScale: 0.9, sheen: 0.3, sheenRoughness: 0.5, sheenColor: 0x8a6a4e }), 7),
   Interior_dark: triplanar(std({ color: 0x141416, roughness: 0.78, bumpMap: plasticBump, bumpScale: 0.3 }), 9),
   Interior_light: triplanar(std({ color: 0x2c2d31, roughness: 0.72, bumpMap: plasticBump, bumpScale: 0.3 }), 9),
   plastic_gray: triplanar(std({ color: 0x18181a, roughness: 0.6, bumpMap: plasticBump, bumpScale: 0.2 }), 9),
   Carpet: triplanar(std({ color: 0x101012, roughness: 1.0, bumpMap: carpetBump, bumpScale: 1.0 }), 6),
-  Carbon_Fiber: phys({
-    map: carbonMap, metalness: 0.3, roughness: 0.45, clearcoat: 1.0, clearcoatRoughness: 0.08
-  }),
+  // fibra de carbono: a trama, com mechas de pouco mais de 2 mm, fica sob uma camada lisa de verniz
+  Carbon_Fiber: triplanar(phys({
+    map: carbonMap, bumpMap: carbonMap, bumpScale: 0.3, metalness: 0.35, roughness: 0.4, clearcoat: 1.0, clearcoatRoughness: 0.05
+  }), 57, true),
   metal_gray: alloy,
-  metal_chrome: std({ color: 0xc9ccd1, metalness: 1.0, roughness: 0.14 }),
+  metal_chrome: std({ color: 0xcfd2d6, metalness: 1.0, roughness: 0.12 }),
   Tires: std({ color: 0x0c0c0d, roughness: 0.85 }),
   Taillight_Glass: tailGlass,
   Projector_Glass: headGlass,
@@ -168,7 +203,7 @@ const MATERIALS = {
 };
 // Discos de freio perfurados: os furos são desenhados pelo raio e pelo ângulo em torno do eixo, e viram um borrão quando a roda gira
 const discSpin = { value: 0 };
-const disc = std({ color: 0x55585d, metalness: 0.75, roughness: 0.48 });
+const disc = std({ color: 0x4c4e52, metalness: 0.8, roughness: 0.44 });
 disc.onBeforeCompile = (shader) => {
   shader.uniforms.uSpin = discSpin;
   shader.vertexShader = shader.vertexShader
@@ -181,11 +216,17 @@ disc.onBeforeCompile = (shader) => {
       float row = 0.142 + 0.016 * mod(floor(column), 4.0), edge = fwidth(discR);
       float away = length(vec2((fract(column) - 0.5) * 6.2831853 / 36.0 * discR, discR - row));
       float hole = (1.0 - smoothstep(0.0036 - edge, 0.0036 + edge, away)) * step(0.8, vFlat) * (1.0 - smoothstep(0.0015, 0.005, edge));
-      diffuseColor.rgb *= 1.0 - 0.85 * hole * (1.0 - uSpin);`);
+      diffuseColor.rgb *= 1.0 - 0.85 * hole * (1.0 - uSpin);`)
+    // a pastilha deixa a pista do disco riscada em círculos: cada faixa fina de raio brilha um pouco mais ou um pouco menos
+    .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+      float scratch = fract(sin(floor(discR * 1400.0) * 91.7) * 43758.5453) - 0.5;
+      roughnessFactor = clamp(roughnessFactor + 0.3 * scratch * step(0.8, vFlat) * (1.0 - smoothstep(0.0003, 0.0012, edge)), 0.06, 1.0);`);
 };
 // Exceções por nome da peça (peças que compartilham material no modelo original)
 const MESH_OVERRIDES = [
   [/^brake(_\d)?$/, disc],
+  [/^rim_/, alloyFace],
+  [/^wheel(_\d)?$/, alloyBody],
   [/^grills/, triplanar(std({ map: grilleMap, bumpMap: grilleMap, bumpScale: 1.2, color: 0x4a4c50, metalness: 0.55, roughness: 0.5 }), 105, true)],
   [/^(nuts|centre)/, darkMetal],
 ];
@@ -199,7 +240,7 @@ const MECH = {
   black: () => std({ color: 0x141517, roughness: 0.62, bumpMap: plasticBump, bumpScale: 0.2 }),
   rubber: () => std({ color: 0x0c0c0d, roughness: 0.9 }),
   plenum: () => std({ color: 0x2c2f34, metalness: 0.2, roughness: 0.85, bumpMap: castBump, bumpScale: 0.6 }),
-  carbon: () => phys({ map: carbonMap, metalness: 0.3, roughness: 0.45, clearcoat: 1.0, clearcoatRoughness: 0.08 }),
+  carbon: () => triplanar(phys({ map: carbonMap, bumpMap: carbonMap, bumpScale: 0.3, metalness: 0.35, roughness: 0.4, clearcoat: 1.0, clearcoatRoughness: 0.05 }), 57, true),
   inox: () => std({ color: 0xb3b3b1, metalness: 1.0, roughness: 0.27 }),
   inoxHot: () => std({ color: 0x8a7e70, metalness: 1.0, roughness: 0.4 }),
   core: () => std({ map: finMap, metalness: 0.7, roughness: 0.6 }),
@@ -207,7 +248,7 @@ const MECH = {
   copper: () => std({ color: 0x9c7150, metalness: 1.0, roughness: 0.4 }),
   cable: () => std({ color: 0x7c1d18, roughness: 0.6 }),
   spring: () => std({ color: 0x262b33, metalness: 0.7, roughness: 0.4 }),
-  caliper: () => std({ color: 0x61656c, metalness: 0.8, roughness: 0.36 }),
+  caliper: () => phys({ color: 0xe2b100, roughness: 0.42, clearcoat: 1.0, clearcoatRoughness: 0.07 }),   // pinças pintadas de amarelo
   carpet: () => std({ color: 0x0c0c0e, roughness: 1.0, bumpMap: carpetBump, bumpScale: 1.0 }),
   blue: () => std({ color: 0x2456a8, roughness: 0.5 }),
   yellow: () => std({ color: 0xc9a227, roughness: 0.5 }),
@@ -227,7 +268,7 @@ function highlight(id, on) {
 
 // Carroceria em raio-X: casca translúcida que só aparece nos contornos
 const ghost = new THREE.ShaderMaterial({
-  uniforms: { uColor: { value: new THREE.Color() }, uBase: { value: 0.02 }, uRim: { value: 0.42 } },
+  uniforms: { uColor: { value: new THREE.Color() }, uBase: { value: 0.02 }, uRim: { value: 0.42 }, uCurve: { value: 1 } },
   vertexShader: `
     varying vec3 vN; varying vec3 vV;
     void main() {
@@ -236,14 +277,26 @@ const ghost = new THREE.ShaderMaterial({
       gl_Position = projectionMatrix * mv;
     }`,
   fragmentShader: `
-    uniform vec3 uColor; uniform float uBase; uniform float uRim;
+    uniform vec3 uColor; uniform float uBase; uniform float uRim; uniform float uCurve;
     varying vec3 vN; varying vec3 vV;
     void main() {
       float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
-      gl_FragColor = vec4(uColor, uBase + uRim * f * f);
+      gl_FragColor = vec4(uColor, pow(uBase + uRim * f * f, uCurve));
+      #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`,
-  transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: !LITE,
 });
+// Dá à casca a cor `hex`, acertada para a exposição atual. Uma casca escura só escurece o que está atrás dela, e a cor
+// é convertida como qualquer outra. Uma casca clara soma luz à imagem, e pouca luz já aparece muito: para o contorno
+// ficar branco e o meio continuar limpo, deixando ver as peças nas cores delas, a opacidade cai com a curva da tela (2,2)
+// e a cor é acertada para o brilho que chega à borda, não para a cor cheia, que perto do branco pediria uma luz sem fim
+function tintGhost(hex) {
+  const u = ghost.uniforms, tone = u.uColor.value.setHex(hex), light = !LITE && tone.r + tone.g + tone.b > 1.5;
+  u.uCurve.value = light ? 2.2 : 1;
+  if (!light) return onScreen(tone);
+  const rim = (u.uBase.value + u.uRim.value) ** 2.2;
+  return onScreen(tone.multiplyScalar(rim)).multiplyScalar(1 / rim);
+}
 
-export { castBump, std, phys, bodyMaterial, headGlass, ledGlass, tailGlass, redButton, discSpin, MATERIALS, MESH_OVERRIDES, mats, highlight, ghost };
+export { castBump, std, phys, emblem, bodyMaterial, paintFlake, headGlass, ledGlass, tailGlass, redButton, discSpin, MATERIALS, MESH_OVERRIDES, mats, highlight, ghost, tintGhost };
