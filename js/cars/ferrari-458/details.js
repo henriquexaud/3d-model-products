@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { LITE, X0, layers } from './config.js';
-import { renderer, scene, camera } from './scene.js';
-import { std, emblem } from './materials.js';
-import { toLayer } from './layers.js';
-import { paint, textureOf } from './praca-textures.js';
-import { seeThrough, behind, glance, beforeFrame } from './post.js';
+import { LITE, layers } from '../../config.js';
+import { X0 } from './spec.js';
+import { renderer, scene, camera } from '../../scene.js';
+import { std, emblem } from '../../materials.js';
+import { toLayer } from '../../layers.js';
+import { paint, textureOf } from '../../praca-textures.js';
+import { seeThrough, behind, glance, beforeFrame } from '../../post.js';
 
 // ---------- Detalhes acrescentados ao modelo ----------
 // Peças e texturas que o modelo original não traz: pneus com banda de rodagem e inscrições, que cedem onde tocam o chão,

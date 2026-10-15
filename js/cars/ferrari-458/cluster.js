@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { LITE } from './config.js';
-import { selfLight } from './scene.js';
-import { toLayer } from './layers.js';
-import { paint, textureOf } from './praca-textures.js';
+import { LITE } from '../../config.js';
+import { selfLight } from '../../scene.js';
+import { toLayer } from '../../layers.js';
+import { paint, textureOf } from '../../praca-textures.js';
 
 // ---------- Painel de instrumentos ----------
 // O modelo traz o conta-giros e as duas telas como superfícies lisas. Aqui eles ganham mostrador, ponteiro e números,

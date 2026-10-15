@@ -200,31 +200,11 @@ function clearGlass() {
   return glass;
 }
 
-// Material por nome do material original do modelo
-const MATERIALS = {
-  Body_Color: bodyMaterial,
-  Glass_Gray: LITE
-    ? phys({ color: 0x9fb4bd, metalness: 0, roughness: 0, transparent: true, opacity: 0.3, envMapIntensity: 1.5 })
-    : clearGlass(),
-  // couro: quase preto, de grão miúdo, com o brilho macio que ele ganha quando a luz bate de raspão
-  Leather: triplanar(phys({ color: 0x1b1b1e, roughness: 0.52, bumpMap: leatherBump, bumpScale: 0.9, sheen: 0.4, sheenRoughness: 0.45, sheenColor: 0x66666c }), 7),
-  Leather_red: triplanar(phys({ color: 0x6a4a31, roughness: 0.56, bumpMap: leatherBump, bumpScale: 0.9, sheen: 0.3, sheenRoughness: 0.5, sheenColor: 0x8a6a4e }), 7),
-  Interior_dark: triplanar(std({ color: 0x141416, roughness: 0.78, bumpMap: plasticBump, bumpScale: 0.3 }), 9),
-  Interior_light: triplanar(std({ color: 0x2c2d31, roughness: 0.72, bumpMap: plasticBump, bumpScale: 0.3 }), 9),
-  plastic_gray: triplanar(std({ color: 0x18181a, roughness: 0.6, bumpMap: plasticBump, bumpScale: 0.2 }), 9),
-  Carpet: triplanar(std({ color: 0x101012, roughness: 1.0, bumpMap: carpetBump, bumpScale: 1.0 }), 6),
-  // fibra de carbono: a trama, com mechas de pouco mais de 2 mm, fica sob uma camada lisa de verniz
-  Carbon_Fiber: triplanar(phys({
-    map: carbonMap, bumpMap: carbonMap, bumpScale: 0.3, metalness: 0.35, roughness: 0.4, clearcoat: 1.0, clearcoatRoughness: 0.05
-  }), 57, true),
-  metal_gray: alloy,
-  metal_chrome: std({ color: 0xcfd2d6, metalness: 1.0, roughness: 0.12 }),
-  Tires: std({ color: 0x0c0c0d, roughness: 0.85 }),
-  Taillight_Glass: tailGlass,
-  Projector_Glass: headGlass,
-  Turn_Signal_LED: ledGlass,
-  Ferrari_Yellow: darkMetal,
-};
+// O vidro das janelas: no celular, uma lâmina translúcida simples
+const carGlass = LITE
+  ? phys({ color: 0x9fb4bd, metalness: 0, roughness: 0, transparent: true, opacity: 0.3, envMapIntensity: 1.5 })
+  : clearGlass();
+
 // Discos de freio perfurados: os furos são desenhados pelo raio e pelo ângulo em torno do eixo, e viram um borrão quando a roda gira
 const discSpin = { value: 0 };
 const disc = std({ color: 0x4c4e52, metalness: 0.8, roughness: 0.44 });
@@ -246,15 +226,6 @@ disc.onBeforeCompile = (shader) => {
       float scratch = fract(sin(floor(discR * 1400.0) * 91.7) * 43758.5453) - 0.5;
       roughnessFactor = clamp(roughnessFactor + 0.3 * scratch * step(0.8, vFlat) * (1.0 - smoothstep(0.0003, 0.0012, edge)), 0.06, 1.0);`);
 };
-// Exceções por nome da peça (peças que compartilham material no modelo original)
-const MESH_OVERRIDES = [
-  [/^brake(_\d)?$/, disc],
-  [/^rim_/, alloyFace],
-  [/^wheel(_\d)?$/, alloyBody],
-  [/^grills/, triplanar(std({ map: grilleMap, bumpMap: grilleMap, bumpScale: 1.2, color: 0x4a4c50, metalness: 0.55, roughness: 0.5 }), 105, true)],
-  [/^(nuts|centre)/, darkMetal],
-];
-
 // Materiais das peças mecânicas. Cada camada recebe cópias próprias, para poder ser destacada sozinha
 const MECH = {
   alu: () => std({ color: 0xa9adb3, metalness: 0.9, roughness: 0.52, bumpMap: castBump, bumpScale: 0.35 }),
@@ -323,4 +294,7 @@ function tintGhost(hex) {
   return onScreen(tone.multiplyScalar(rim)).multiplyScalar(1 / rim);
 }
 
-export { castBump, std, phys, emblem, bodyMaterial, paintFlake, headGlass, ledGlass, tailGlass, redButton, discSpin, MATERIALS, MESH_OVERRIDES, mats, highlight, ghost, tintGhost };
+export {
+  castBump, leatherBump, plasticBump, carpetBump, carbonMap, grilleMap, triplanar, std, phys, emblem, bodyMaterial, paintFlake,
+  alloy, alloyFace, alloyBody, darkMetal, carGlass, headGlass, ledGlass, tailGlass, redButton, disc, discSpin, mats, highlight, ghost, tintGhost,
+};

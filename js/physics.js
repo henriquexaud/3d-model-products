@@ -1,22 +1,11 @@
+import { spec } from './cars/index.js';
+
 // ---------- Física do carro em linha reta ----------
 // O motor empurra pelas rodas traseiras, através do câmbio; o ar, a rolagem dos pneus e os freios seguram.
 // Um "motorista" dosa acelerador e freio para levar o carro à velocidade pedida. Tudo em unidades do SI
 const GRAVITY = 9.81;
-const CAR = {
-  mass: 1610,                           // kg, com motorista e meio tanque
-  wheelbase: 2.651, cgHeight: 0.46,     // m
-  rearShare: 0.58,                      // parte do peso sobre o eixo traseiro, que é o que traciona
-  wheelRadius: 0.358,                   // m
-  dragArea: 0.36 * 2.03,                // coeficiente de arrasto × área frontal (m²), com a capota aberta
-  downforceArea: 0.74,                  // o ar também aperta o carro contra o chão: ~140 kg a 200 km/h
-  airDensity: 1.2,                      // kg/m³
-  rolling: 0.011, rollingSpeed: 44.4,   // rolagem dos pneus: f · (1 + v / 160 km/h) · peso
-  grip: 1.1,                            // aderência pneu-asfalto seco
-  gears: [3.08, 2.19, 1.63, 1.29, 1.03, 0.84, 0.69], finalDrive: 5.14, efficiency: 0.88,
-  idle: 900, redline: 9000,             // rpm
-  torque: [[900, 320], [2000, 400], [3000, 450], [4000, 490], [5000, 525], [6000, 540], [7000, 530], [8000, 495], [9000, 445]],   // N·m
-  topSpeed: 320 / 3.6,                  // m/s
-};
+// As medidas são as do carro escolhido (ver `physics` na ficha dele); o arrasto entra como coeficiente × área frontal
+const CAR = { ...spec.physics, dragArea: spec.physics.drag * spec.physics.frontalArea };
 // o quanto ele pede de aceleração (1/s) e os limites (m/s²). A frenagem chega perto do que os pneus aguentam (~0,9 g)
 // e continua progressiva: o pedal entra em uma fração de segundo e alivia à medida que a velocidade pedida se aproxima
 const DRIVER = { gain: 0.8, accel: 4.5, decel: 9 };

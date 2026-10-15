@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { AX_R, WHEEL_Y, measures, LAYERS } from './config.js';
-import { mats } from './materials.js';
-import { G } from './layers.js';
-import { V, S, rod, cyl, rbox, beam, tube, polyPipe, extrude, hull, mergeMeshes } from './geometry.js';
+import { measures, LAYERS } from '../../config.js';
+import { AX_R, WHEEL_Y } from './spec.js';
+import { mats } from '../../materials.js';
+import { G } from '../../layers.js';
+import { V, S, rod, cyl, rbox, beam, tube, polyPipe, extrude, hull, mergeMeshes } from '../../geometry.js';
 
 // ---------- Peças mecânicas ----------
 // Tudo em metros, nas proporções reais de um esportivo V8 de motor central, encaixado nos vãos do modelo.

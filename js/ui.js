@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { COLORS, ENVS, LITE, X0, measures, LAYERS, state, look, $, hintEl, hintText } from './config.js';
+import { COLORS, ENVS, LITE, measures, LAYERS, state, look, $, hintEl, hintText } from './config.js';
+import { spec } from './cars/index.js';
 import { renderer, shadowsDirty, setExposure, camera, controls } from './scene.js';
 import { studio, applyStudio } from './studio.js';
 import { bodyMaterial, paintFlake, highlight, ghost, tintGhost } from './materials.js';
@@ -7,9 +8,10 @@ import { bodyMeshes } from './layers.js';
 import { praca, ensurePraca } from './praca.js';
 import { road, ensureRoad } from './road.js';
 import { showHeavens } from './night.js';
-import { CAR } from './physics.js';
+import { CAR, GRAVITY } from './physics.js';
 import { RIDE, SPRUNG, CORNERS } from './ride.js';
 import { setDriving } from './drive.js';
+import { engineSound } from './sound.js';
 import { hold, unfold } from './blueprint.js';
 
 // ---------- Interface ----------
@@ -126,8 +128,8 @@ function setView(view) {
   state.view = view;
   if (view === 'interior') {
     // Câmera na posição do motorista; arrastar olha em volta
-    controls.target.set(-0.36, 0.97, 0.17);
-    camera.position.set(-0.36, 0.98, 0.22);
+    controls.target.set(...spec.view.seat.target);
+    camera.position.set(...spec.view.seat.eye);
     camera.fov = 70;
     controls.minDistance = controls.maxDistance = 0.05;
     controls.maxPolarAngle = Math.PI * 0.75;
@@ -141,9 +143,9 @@ function setView(view) {
     const portrait = camera.aspect < 1;
     camera.fov = portrait ? 50 : 40;
     const halfWidth = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect);
-    const distance = Math.max(6.25, 2.5 / Math.tan(halfWidth));
-    controls.target.set(0, 0.5, 0);
-    camera.position.set(4.25, 0.9, -4.5).setLength(distance).add(controls.target);
+    const distance = Math.max(spec.view.fit, spec.view.halfLength / Math.tan(halfWidth));
+    controls.target.set(...spec.view.target);
+    camera.position.set(...spec.view.from).setLength(distance).add(controls.target);
     state.fit = distance;
     controls.maxDistance = Math.max(state.env.scenery ? 16 : 9, distance * 1.3);   // ao ar livre dá para recuar e ver o cenário
     controls.minPolarAngle = 0;
@@ -172,7 +174,7 @@ function applyBodyMode() {
   }
   shadowsDirty();
   // sem a carroceria no caminho, a câmera pode chegar mais perto das peças
-  if (state.view === 'exterior') controls.minDistance = state.body === 'solid' ? 2.5 : 1.2;
+  if (state.view === 'exterior') controls.minDistance = state.body === 'solid' ? spec.view.near.solid : spec.view.near.open;
   markBody(BODY.indexOf(state.body));
   if (state.open && !spotAllowed(state.open)) closeCard();
 }
@@ -221,7 +223,7 @@ function fillSpecs(dl, specs) {
   for (const [key, value] of specs) {
     const dt = document.createElement('dt'), dd = document.createElement('dd');
     dt.textContent = key;
-    dd.textContent = typeof value === 'function' ? value() : value;
+    dd.textContent = typeof value === 'function' ? value(measures) : value;
     dl.append(dt, dd);
   }
 }
@@ -248,7 +250,7 @@ card.querySelector('.close').addEventListener('click', closeCard);
 // Os pontos acompanham o modelo; por fora só aparecem os das camadas visíveis com a carroceria sólida
 const spotAllowed = (L) =>
   state.spots && state.view === 'exterior' && layerVisible(L) && (L.exterior || state.body !== 'solid');
-const anchor = new THREE.Vector3(), toCamera = new THREE.Vector3();
+const anchor = new THREE.Vector3(), toCamera = new THREE.Vector3(), X0 = spec.frame.x0;
 const SPOTS = LAYERS.filter((L) => L.spot);
 function updateSpots() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -320,11 +322,13 @@ function openSheet() {
     add(body, 'h4', 'Cenário');
     fold('Estrada', [['Faixas', '2 × 3,60 m'], ['Acostamentos', '2,50 m e 0,60 m'], ['Linha tracejada', 'traço de 4 m a cada 16 m'],
       ['Largura das linhas', '15 cm'], ['Defensa metálica', '75 cm de altura, postes a cada 4 m']]);
-    fold('Como o movimento é calculado', [['Massa com motorista', `${CAR.mass.toLocaleString('pt-BR')} kg`], ['Arrasto do ar (Cx × área)', '0,36 × 2,03 m²'],
-      ['Pressão aerodinâmica', '140 kg a 200 km/h'], ['Rolagem dos pneus', '1,1% do peso, mais a cada km/h'],
+    const n = (v) => v.toLocaleString('pt-BR');
+    const pressed = 0.5 * CAR.airDensity * CAR.downforceArea * (200 / 3.6) ** 2 / GRAVITY;   // kg que o ar põe sobre o carro a 200 km/h
+    fold('Como o movimento é calculado', [['Massa com motorista', `${CAR.mass.toLocaleString('pt-BR')} kg`], ['Arrasto do ar (Cx × área)', `${n(CAR.drag)} × ${n(CAR.frontalArea)} m²`],
+      ['Pressão aerodinâmica', `${Math.round(pressed / 10) * 10} kg a 200 km/h`], ['Rolagem dos pneus', `${n(CAR.rolling * 100)}% do peso, mais a cada km/h`],
       ['Aderência dos pneus', `${CAR.grip.toLocaleString('pt-BR')} g`], ['Câmbio', `${CAR.gears.length} marchas, diferencial ${CAR.finalDrive.toLocaleString('pt-BR')}`],
-      ['Velocidade máxima', `${Math.round(CAR.topSpeed * 3.6)} km/h`], ['Direção', 'Volante 11,9:1 · a roda de dentro da curva esterça mais'],
-      ['Rodas', 'Giram a distância percorrida dividida pelo raio de 358 mm']]);
+      ['Velocidade máxima', `${Math.round(CAR.topSpeed * 3.6)} km/h`], ['Direção', `Volante ${n(CAR.steering)}:1 · a roda de dentro da curva esterça mais`],
+      ['Rodas', `Giram a distância percorrida dividida pelo raio de ${Math.round(CAR.wheelRadius * 1000)} mm`]]);
     fold('Como a suspensão é calculada', [['Massa apoiada nas molas', `${SPRUNG.toLocaleString('pt-BR')} kg`], ['Massa de cada roda diant. / tras.', `${RIDE.unsprung[0]} / ${RIDE.unsprung[2]} kg`],
       ['Molas, medidas na roda', `${Math.round(CORNERS[0].k / 1000)} / ${Math.round(CORNERS[2].k / 1000)} N/mm`],
       ['Amortecimento', `${Math.round(RIDE.damping * 100)}% do crítico nos movimentos lentos`], ['Pneu', `${RIDE.tyre / 1000} N/mm`],
@@ -336,6 +340,11 @@ function openSheet() {
 }
 $('btnSheet').addEventListener('click', openSheet);
 sheet.querySelector('.close').addEventListener('click', () => { sheet.hidden = true; });
+// M liga e desliga o som (que só toca na Estrada)
+window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() !== 'm' || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  say(engineSound.toggle() ? 'Som ligado' : 'Som desligado');
+});
 window.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!sheet.hidden) sheet.hidden = true; else if (!pop.hidden) showLayers(false); else closeCard();

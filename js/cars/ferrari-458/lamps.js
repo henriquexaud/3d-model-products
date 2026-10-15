@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { LITE, X0, layers, state, look } from './config.js';
-import { scene, selfLight } from './scene.js';
-import { headGlass, ledGlass, tailGlass } from './materials.js';
-import { M } from './layers.js';
-import { smooth, paint, textureOf } from './praca-textures.js';
-import { invalidate } from './pace.js';
+import { LITE, layers, state, look } from '../../config.js';
+import { X0 } from './spec.js';
+import { scene, selfLight } from '../../scene.js';
+import { headGlass, ledGlass, tailGlass } from '../../materials.js';
+import { M } from '../../layers.js';
+import { smooth, paint, textureOf } from '../../praca-textures.js';
+import { invalidate } from '../../pace.js';
 
 // ---------- Faróis e lanternas ----------
 // Um farol aceso é mais do que uma lente clara: ela estoura de brilho, a câmera enxerga um halo em volta dela

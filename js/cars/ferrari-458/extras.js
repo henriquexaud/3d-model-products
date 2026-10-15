@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { X0, layers } from './config.js';
-import { mats, emblem } from './materials.js';
-import { G, M, carve } from './layers.js';
-import { V, S, rod, cyl, rbox, beam, tube, polyPipe, mergeMeshes } from './geometry.js';
+import { layers } from '../../config.js';
+import { X0 } from './spec.js';
+import { mats, emblem } from '../../materials.js';
+import { G, M, carve } from '../../layers.js';
+import { V, S, rod, cyl, rbox, beam, tube, polyPipe, mergeMeshes } from '../../geometry.js';
 import { ENGINE } from './mechanics.js';
 
 // ---------- Detalhes de funcionamento ----------

@@ -1,49 +1,39 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { ASSETS, DRACO, ENVS, layers, state, statusEl } from './config.js';
+import { ENVS, layers, state, statusEl } from './config.js';
 import { renderer, scene, camera, controls, studioEnv } from './scene.js';
-import { carRoot, prepareModel } from './layers.js';
-import { buildMechanics, finishMechanics } from './mechanics.js';
-import { buildSuspension } from './suspension.js';
-import { buildExtras } from './extras.js';
+import { carRoot } from './layers.js';
+import { car } from './car.js';
 import { praca, blow } from './praca.js';
 import { road, ensureRoad } from './road.js';
 import { studio } from './studio.js';
 import { nightSky } from './night.js';
-import { addDetails } from './details.js';
-import { buildCluster } from './cluster.js';
-import { buildMirrors, updateMirrors, warmMirrors } from './mirrors.js';
-import { sim, ride, helm, updateDrive, boardCamera, leaveCamera } from './drive.js';
-import { updateLamps } from './lamps.js';
+import { sim, ride, helm, engine, updateDrive, boardCamera, leaveCamera } from './drive.js';
+import { engineSound } from './sound.js';
 import { applyBodyMode, updateSpots, say, curtain } from './ui.js';
 import { render, prepare, strip, warmPost } from './post.js';
 import { invalidate, consume, measure, governResolution, settle, gauge, schedule, later } from './pace.js';
 import { plan, tickPlan, wave } from './blueprint.js';
 
 // ---------- Modelo ----------
-const shadowTexture = new THREE.TextureLoader().load(ASSETS + 'ferrari_ao.png');
+// O do carro escolhido (ver a ficha dele, em cars/): o arquivo 3D, a sombra de contato e a montagem das peças
+const { model } = car.spec;
+const shadowTexture = new THREE.TextureLoader().load(model.ao);
 const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath(DRACO);
+dracoLoader.setDecoderPath(model.draco);
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 const outdoor = () => (state.env.scenery === 'praca' ? praca : state.env.scenery === 'road' ? road : null);
 
 loader.load(
-  ASSETS + 'ferrari.glb',
+  model.url,
   async (gltf) => {
-    const discs = prepareModel(gltf.scene.children[0]);
-    buildMechanics();
-    buildSuspension(discs);
-    buildExtras();
-    finishMechanics();
-    addDetails();
-    buildCluster();
-    buildMirrors();
+    car.build(gltf);
 
     // Sombra de contato sob o carro
     const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.655 * 4, 1.3 * 4),
+      new THREE.PlaneGeometry(...model.shadow),
       new THREE.MeshBasicMaterial({
         map: shadowTexture, blending: THREE.MultiplyBlending, toneMapped: false, transparent: true, fog: false
       })
@@ -57,7 +47,7 @@ loader.load(
     // Ainda atrás do véu, os programas de desenho do carro, do cenário e do acabamento são compilados em paralelo,
     // e o primeiro quadro já sai sem tropeço
     await Promise.all([prepare(outdoor()?.group ?? studio, [carRoot]), warmPost()]);
-    warmMirrors();
+    car.warm();
 
     // o véu da carga se desfaz, a interface entra e o cenário se desdobra em volta do carro
     statusEl.classList.add('done');
@@ -65,7 +55,7 @@ loader.load(
     say('Arraste para girar · role para aproximar', 0);
     curtain();
     invalidate();
-    if (location.search.includes('debug')) window.viewer = { THREE, scene, camera, controls, renderer, carRoot, layers, state, applyBodyMode, frame, invalidate, sim, ride, helm, gauge, plan, wave, get praca() { return praca; }, get road() { return road; } };
+    if (location.search.includes('debug')) window.viewer = { THREE, scene, camera, controls, renderer, carRoot, car, layers, state, applyBodyMode, frame, invalidate, sim, ride, helm, engine, gauge, plan, wave, engineSound, get praca() { return praca; }, get road() { return road; } };
 
     // Nas sobras de tempo fica pronto o que falta, para a troca de ambiente ser imediata: a estrada, o céu da noite e o
     // estúdio, com os programas do carro sob a luz de cada um
@@ -106,7 +96,7 @@ function frame() {
   const dt = clock.getDelta();
   if (controls.update()) invalidate(1);
   updateDrive(dt);
-  updateLamps(dt, camera);
+  car.update(dt, camera);
   const waving = wave.active;
   tickPlan(dt);
   if (waving) outdoor()?.onWave?.();   // inclusive no quadro em que a onda termina, para tudo ficar no ponto final
@@ -136,7 +126,7 @@ function frame() {
     scene.fog.far = scene.fog.near + 12;
   }
   const aboard = state.view === 'interior' && boardCamera(camera);
-  updateMirrors(camera);
+  car.mirrors(camera, sim.v > 0.01);
   render();
   if (aboard) leaveCamera(camera);
   updateSpots();

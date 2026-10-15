@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { X0, AX_F, AX_R, WHEEL_Y, measures, mm } from './config.js';
-import { mats } from './materials.js';
-import { G, M } from './layers.js';
-import { V, S, rod, unitRod, pose, cyl, rbox, ball, tube, spring, boot, mergeMeshes } from './geometry.js';
+import { measures, mm } from '../../config.js';
+import { X0, AX_F, AX_R, WHEEL_Y } from './spec.js';
+import { mats } from '../../materials.js';
+import { G, M } from '../../layers.js';
+import { V, S, rod, unitRod, pose, cyl, rbox, ball, tube, spring, boot, mergeMeshes } from '../../geometry.js';
 import { BRAKE_BRACKETS } from './mechanics.js';
-import { CAR } from './physics.js';
-import { RIDE } from './ride.js';
+import { CAR } from '../../physics.js';
+import { RIDE } from '../../ride.js';
 
 // ---------- Suspensão, direção e o que acompanha cada roda ----------
 // Braços triangulares sobrepostos nas quatro rodas. Cada peça é montada onde fica com o carro parado e, a cada quadro,

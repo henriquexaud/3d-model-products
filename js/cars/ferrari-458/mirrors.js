@@ -1,9 +1,8 @@
 import * as THREE from 'three';
-import { LITE, layers, state } from './config.js';
-import { renderer, scene } from './scene.js';
-import { toLayer } from './layers.js';
-import { UP } from './geometry.js';
-import { sim } from './drive.js';
+import { LITE, layers, state } from '../../config.js';
+import { renderer, scene } from '../../scene.js';
+import { toLayer } from '../../layers.js';
+import { UP } from '../../geometry.js';
 import { spinners } from './details.js';
 
 // ---------- Espelhos ----------
@@ -162,12 +161,12 @@ function cameraMoved(camera) {
 
 // Refaz os reflexos dos espelhos que aparecem na tela, gastando o mínimo: com o carro parado e a câmera quieta a imagem
 // não muda, então basta conferi-la de vez em quando; em movimento, o maior espelho é refeito a cada quadro,
-// os outros em quadros alternados e os que aparecem pequenos só algumas vezes por segundo
+// os outros em quadros alternados e os que aparecem pequenos só algumas vezes por segundo. `rolling` diz se o carro anda
 const frustum = new THREE.Frustum(), view = new THREE.Matrix4(), ball = new THREE.Sphere();
-function updateMirrors(camera) {
+function updateMirrors(camera, rolling) {
   if (!mirrors.length) return;
   tick++;
-  const moving = cameraMoved(camera) || sim.v > 0.01;
+  const moving = cameraMoved(camera) || rolling;
   camera.updateMatrixWorld();
   frustum.setFromProjectionMatrix(view.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
   const scale = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));

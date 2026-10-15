@@ -5,7 +5,7 @@ import { LITE, measures, meters } from './config.js';
 import { renderer, scene, sceneries, surroundings, skyEnv } from './scene.js';
 import { castBump, std } from './materials.js';
 import { carRoot } from './layers.js';
-import { dimLamps } from './lamps.js';
+import { car } from './car.js';
 import { UP, V, rod, rbox, ball, mergeMeshes } from './geometry.js';
 import {
   SUN, HAZE, PAVED, seeded, hash2, fbm, smooth, sharedSky, paverTextures, lawnTexture, tuftTexture,
@@ -443,10 +443,10 @@ function snapshot(sky, group, hide) {
   group.traverse((o) => { if (o.userData.unseen) unseen.push(o); });
   const shown = [carRoot, ...hide, ...unseen].filter((o) => o.visible);
   for (const o of shown) o.visible = false;
-  dimLamps(true);
+  car.dim(true);
   renderer.shadowMap.needsUpdate = true;
   const env = whole(() => surroundings(scene, PROBE, 0.3, 300));
-  dimLamps(false);
+  car.dim(false);
   for (const o of shown) o.visible = true;
   return env;
 }

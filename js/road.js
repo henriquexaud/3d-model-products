@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { LITE, SHUTTER, AX_F } from './config.js';
+import { LITE, SHUTTER } from './config.js';
 import { renderer, scene, sceneries, unlit, shadowsDirty } from './scene.js';
 import { std } from './materials.js';
 import { UP } from './geometry.js';
 import { SUN, seeded, hash2, fbm, smooth, paint, textureOf, lawnTexture, tuftTexture } from './praca-textures.js';
 import { cards, buildTree, treeMaterials, daylight, outdoors } from './praca.js';
-import { LOOP, FEATURES, TO_FRONT } from './ride.js';
+import { LOOP, FEATURES } from './relief.js';
+import { PIVOT } from './ride.js';
 import { Sketch, paperFloor, groundFade, sprout, materialize, castsAsDrawn, plan, wave } from './blueprint.js';
 
 // ---------- Estrada ----------
@@ -410,7 +411,7 @@ function* buildRoad(road) {
       holder.userData.lines.visible = wave.active || away > REACH.full - 8;
     }
     // cada irregularidade passa sob o centro de massa do carro quando a distância percorrida chega à posição dela
-    for (const { mark, at } of marks) mark.position.z = AX_F + TO_FRONT + ((distance - at + WRAP / 2) % WRAP + WRAP) % WRAP - WRAP / 2;
+    for (const { mark, at } of marks) mark.position.z = PIVOT[2] + ((distance - at + WRAP / 2) % WRAP + WRAP) % WRAP - WRAP / 2;
   };
   road.move(plan.uPlanScroll.value, plan.uPlanTrail.value);
   castsAsDrawn(group);

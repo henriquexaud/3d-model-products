@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { LITE, state, hintEl } from './config.js';
+import { spec } from './cars/index.js';
 import { invalidate } from './pace.js';
 
 // ---------- Cena ----------
@@ -170,8 +171,8 @@ controls.addEventListener('start', () => {
   controls.autoRotate = false;
   hintEl.classList.add('hidden');
 });
-// No exterior é possível deslocar o ponto de vista, mas sem sair de cima do carro
-const PAN_MIN = new THREE.Vector3(-0.8, 0.2, -1.9), PAN_MAX = new THREE.Vector3(0.8, 0.9, 1.9);
+// No exterior é possível deslocar o ponto de vista, mas sem sair de cima do carro (ver `view.pan` na ficha dele)
+const PAN_MIN = new THREE.Vector3(...spec.view.pan.min), PAN_MAX = new THREE.Vector3(...spec.view.pan.max);
 controls.addEventListener('change', () => {
   if (state.view !== 'exterior') return;
   const t = controls.target, c = t.clone().clamp(PAN_MIN, PAN_MAX);
